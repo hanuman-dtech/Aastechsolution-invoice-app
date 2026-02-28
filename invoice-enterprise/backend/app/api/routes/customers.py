@@ -346,6 +346,27 @@ async def update_contract(
 
 # === Schedule Routes ===
 
+@router.get("/{customer_id}/schedule", response_model=ScheduleConfigResponse)
+async def get_schedule(
+    customer_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get a customer's schedule configuration.
+    """
+    result = await db.execute(
+        select(ScheduleConfig).where(ScheduleConfig.customer_id == customer_id)
+    )
+    schedule = result.scalar_one_or_none()
+
+    if not schedule:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Schedule not found for customer: {customer_id}",
+        )
+
+    return ScheduleConfigResponse.model_validate(schedule)
+
 @router.post("/{customer_id}/schedule", response_model=ScheduleConfigResponse, status_code=status.HTTP_201_CREATED)
 async def create_schedule(
     customer_id: str,

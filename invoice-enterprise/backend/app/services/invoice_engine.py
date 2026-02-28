@@ -488,6 +488,11 @@ class InvoiceEngine:
             started_at=start_time,
             request_id=request_id,
             triggered_by=triggered_by,
+            customers_loaded=0,
+            schedule_matches=0,
+            pdfs_generated=0,
+            emails_sent=0,
+            failures=0,
         )
         db.add(exec_log)
         
@@ -537,7 +542,7 @@ class InvoiceEngine:
                         logger.debug(f"Customer {customer.name} not scheduled for {request.run_date}")
                         continue
                 
-                exec_log.schedule_matches += 1
+                exec_log.schedule_matches = (exec_log.schedule_matches or 0) + 1
                 
                 try:
                     invoice = await self.generate_invoice(
@@ -548,7 +553,7 @@ class InvoiceEngine:
                         mode=mode,
                     )
                     
-                    exec_log.pdfs_generated += 1
+                    exec_log.pdfs_generated = (exec_log.pdfs_generated or 0) + 1
                     generated_invoices.append(InvoiceResponse.model_validate(invoice))
                     
                     # Send email if requested and auto_send is enabled
@@ -564,7 +569,7 @@ class InvoiceEngine:
                                 attachment_path=Path(invoice.pdf_path),
                             )
                             invoice.status = InvoiceStatus.SENT
-                            exec_log.emails_sent += 1
+                            exec_log.emails_sent = (exec_log.emails_sent or 0) + 1
                         except Exception as e:
                             logger.error(f"Failed to send email for {customer.name}: {e}")
                             failures.append({
@@ -588,7 +593,7 @@ class InvoiceEngine:
                         "customer_name": customer.name,
                         "error": str(e),
                     })
-                    exec_log.failures += 1
+                    exec_log.failures = (exec_log.failures or 0) + 1
             
             exec_log.completed_at = datetime.now(timezone.utc)
             await db.commit()

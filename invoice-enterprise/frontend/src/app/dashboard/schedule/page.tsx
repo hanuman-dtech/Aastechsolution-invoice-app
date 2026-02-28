@@ -58,19 +58,19 @@ export default function SchedulePage() {
   });
 
   const handleToggleEnabled = (customer: Customer) => {
-    if (customer.schedule_config) {
+    if (customer.schedule) {
       updateMutation.mutate({
         customerId: customer.id,
-        data: { is_enabled: !customer.schedule_config.is_enabled },
+        data: { is_enabled: !customer.schedule.is_enabled },
       });
     }
   };
 
   const handleToggleAutoEmail = (customer: Customer) => {
-    if (customer.schedule_config) {
+    if (customer.schedule) {
       updateMutation.mutate({
         customerId: customer.id,
-        data: { auto_send_email: !customer.schedule_config.auto_send_email },
+        data: { auto_send_email: !customer.schedule.auto_send_email },
       });
     }
   };
@@ -122,51 +122,51 @@ export default function SchedulePage() {
                       {customer.contract?.frequency ?? "-"}
                     </TableCell>
                     <TableCell>
-                      {customer.schedule_config
-                        ? getWeekdayLabel(customer.schedule_config.billing_weekday)
+                      {customer.schedule
+                        ? getWeekdayLabel(customer.schedule.billing_weekday)
                         : "-"}
                     </TableCell>
                     <TableCell>
-                      {customer.schedule_config?.anchor_date
-                        ? formatDate(customer.schedule_config.anchor_date)
+                      {customer.schedule?.anchor_date
+                        ? formatDate(customer.schedule.anchor_date)
                         : "-"}
                     </TableCell>
                     <TableCell>
-                      {customer.schedule_config?.last_run_date
-                        ? formatDate(customer.schedule_config.last_run_date)
+                      {customer.schedule?.last_run_date
+                        ? formatDate(customer.schedule.last_run_date)
                         : "Never"}
                     </TableCell>
                     <TableCell>
-                      {customer.schedule_config?.next_run_date
-                        ? formatDate(customer.schedule_config.next_run_date)
+                      {customer.schedule?.next_run_date
+                        ? formatDate(customer.schedule.next_run_date)
                         : "-"}
                     </TableCell>
                     <TableCell>
                       <Button
                         variant={
-                          customer.schedule_config?.auto_send_email
+                          customer.schedule?.auto_send_email
                             ? "default"
                             : "outline"
                         }
                         size="sm"
                         onClick={() => handleToggleAutoEmail(customer)}
-                        disabled={!customer.schedule_config || updateMutation.isPending}
+                        disabled={!customer.schedule || updateMutation.isPending}
                       >
-                        {customer.schedule_config?.auto_send_email ? "ON" : "OFF"}
+                        {customer.schedule?.auto_send_email ? "ON" : "OFF"}
                       </Button>
                     </TableCell>
                     <TableCell>
                       <Button
                         variant={
-                          customer.schedule_config?.is_enabled
+                          customer.schedule?.is_enabled
                             ? "default"
                             : "secondary"
                         }
                         size="sm"
                         onClick={() => handleToggleEnabled(customer)}
-                        disabled={!customer.schedule_config || updateMutation.isPending}
+                        disabled={!customer.schedule || updateMutation.isPending}
                       >
-                        {customer.schedule_config?.is_enabled
+                        {customer.schedule?.is_enabled
                           ? "Enabled"
                           : "Disabled"}
                       </Button>
