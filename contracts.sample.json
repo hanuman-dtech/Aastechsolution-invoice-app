@@ -1,0 +1,78 @@
+{
+  "vendor": {
+    "name": "AAS Tech Solutions Corp",
+    "email": "contact@aastechsolutions.com",
+    "address_lines": [
+      "1434 Largo Cres",
+      "Oshawa, ON L1G 7E5"
+    ],
+    "hst_number": "733392369RT0001",
+    "default_contractor": "Anusha Veeramalla"
+  },
+  "customers": [
+    {
+      "invoice_prefix": "TEK",
+      "name": "Tekgence Canada Inc",
+      "email": "ap_canada@tekgence.com",
+      "address_lines": [
+        "67 Yonge St Suite No. 701",
+        "Toronto, Ontario, Canada, M5E 1J8"
+      ],
+      "contractor_name": "Anusha Veeramalla",
+      "service_location": "Ontario, Canada",
+      "frequency": "monthly",
+      "schedule": {
+        "billing_day": 1
+      },
+      "hours": "48.00",
+      "rate_per_hour": "45.00",
+      "hst_rate": "0.15",
+      "payment_terms": "Monthly",
+      "extra_fees": "0.00",
+      "extra_fees_label": "Platform / Tooling Fees"
+    },
+    {
+      "invoice_prefix": "ACM",
+      "name": "Acme Digital Labs",
+      "email": "finance@acmedigital.com",
+      "address_lines": [
+        "120 King St W",
+        "Toronto, ON M5H 1J9"
+      ],
+      "contractor_name": "Anusha Veeramalla",
+      "service_location": "Ontario, Canada",
+      "frequency": "biweekly",
+      "schedule": {
+        "billing_weekday": 4,
+        "anchor_date": "2026-01-02"
+      },
+      "hours": "80.00",
+      "rate_per_hour": "60.00",
+      "hst_rate": "0.13",
+      "payment_terms": "Biweekly",
+      "extra_fees": "125.00",
+      "extra_fees_label": "Cloud / Tools"
+    },
+    {
+      "invoice_prefix": "NXT",
+      "name": "NextWave Systems",
+      "email": "accounts@nextwave.com",
+      "address_lines": [
+        "90 Wellington St",
+        "Kitchener, ON N2G 2E9"
+      ],
+      "contractor_name": "Anusha Veeramalla",
+      "service_location": "Ontario, Canada",
+      "frequency": "weekly",
+      "schedule": {
+        "billing_weekday": 4
+      },
+      "hours": "36.00",
+      "rate_per_hour": "55.00",
+      "hst_rate": "0.13",
+      "payment_terms": "Weekly",
+      "extra_fees": "0.00",
+      "extra_fees_label": "Other Fees"
+    }
+  ]
+}

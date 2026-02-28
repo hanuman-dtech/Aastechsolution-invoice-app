@@ -1,0 +1,4 @@
+.env
+generated_invoices/
+__pycache__/
+*.pyc
