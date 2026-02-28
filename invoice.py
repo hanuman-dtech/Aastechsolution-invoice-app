@@ -276,6 +276,7 @@ def generate_and_optionally_send(
     output_dir: Path,
     run_date: date,
     send_email: bool,
+    ignore_schedule: bool,
 ):
     config = json.loads(contracts_file.read_text(encoding="utf-8"))
     vendor = config["vendor"]
@@ -289,11 +290,13 @@ def generate_and_optionally_send(
 
     generated = 0
     emailed = 0
+    skipped: list[tuple[str, str, dict]] = []
 
     for customer in customers:
         frequency = customer.get("frequency", "monthly")
         schedule = customer.get("schedule", {})
-        if not should_invoice_today(run_date, frequency, schedule):
+        if not ignore_schedule and not should_invoice_today(run_date, frequency, schedule):
+            skipped.append((customer.get("name", "Unknown customer"), frequency, schedule))
             continue
 
         period_start, period_end = compute_billing_period(run_date, frequency)
@@ -352,6 +355,16 @@ def generate_and_optionally_send(
             emailed += 1
 
     print(f"Generated {generated} invoice(s) for run date {run_date.isoformat()}.")
+    if generated == 0:
+        print("No invoices matched today's schedule.")
+        print(
+            "Tip: use --run-date YYYY-MM-DD for a billing day or pass --ignore-schedule to force generation for all customers."
+        )
+        if skipped:
+            print("Skipped customers:")
+            for customer_name, frequency, schedule in skipped:
+                print(f"  - {customer_name}: frequency={frequency}, schedule={schedule}")
+
     if send_email:
         print(f"Sent {emailed} invoice email(s).")
 
@@ -361,6 +374,7 @@ if __name__ == "__main__":
     parser.add_argument("--contracts-file", default="contracts.sample.json", help="Path to customer contracts JSON file")
     parser.add_argument("--output-dir", default="generated_invoices", help="Directory for generated PDF invoices")
     parser.add_argument("--run-date", default=date.today().isoformat(), help="Run date in YYYY-MM-DD")
+    parser.add_argument("--ignore-schedule", action="store_true", help="Generate for all customers regardless of schedule")
     parser.add_argument("--send-email", action="store_true", help="Send generated invoices via SMTP")
     args = parser.parse_args()
 
@@ -369,4 +383,5 @@ if __name__ == "__main__":
         output_dir=Path(args.output_dir),
         run_date=parse_date(args.run_date),
         send_email=args.send_email,
+        ignore_schedule=args.ignore_schedule,
     )
