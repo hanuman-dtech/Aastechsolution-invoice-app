@@ -49,6 +49,10 @@ Prompts only:
 
 Everything else comes from `contracts.sample.json` presets (rate, HST, address, fees, payment terms, etc.).
 
+To send email in the same quick flow:
+
+`python3 invoice.py --quick --send-email`
+
 ### 3) Full interactive wizard
 
 `python3 invoice.py --wizard`
@@ -79,7 +83,7 @@ Guided options with format hints, including:
 Notes:
 
 - `.env` is auto-loaded by the script.
-- Email mode never auto-falls back to all customers; it follows schedule unless `--all` is provided.
+- If `--send-email` finds zero scheduled customers, it automatically switches to quick 3-input mode (customer/date/hours) and sends that invoice email.
 
 ## Notes
 

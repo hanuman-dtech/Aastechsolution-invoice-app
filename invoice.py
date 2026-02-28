@@ -382,7 +382,15 @@ def send_invoice_email(
     with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
         server.starttls()
         if smtp_user:
-            server.login(smtp_user, smtp_password)
+            if not smtp_password:
+                raise RuntimeError("SMTP_PASSWORD is empty. Set it in .env before using --send-email.")
+            try:
+                server.login(smtp_user, smtp_password)
+            except smtplib.SMTPAuthenticationError as exc:
+                raise RuntimeError(
+                    "SMTP authentication failed (535). Check SMTP_USER / SMTP_PASSWORD. "
+                    "For iCloud custom domain, use smtp.mail.me.com:587 with an Apple app-specific password."
+                ) from exc
         server.send_message(msg)
 
 
@@ -621,7 +629,7 @@ def run_interactive_wizard() -> None:
         print(f"Email sent to: {customer_email}")
 
 
-def run_quick_customer_mode(contracts_file: Path, output_dir: Path) -> None:
+def run_quick_customer_mode(contracts_file: Path, output_dir: Path, send_email: bool = False) -> None:
     """Prompt only for customer name, run date, and hours; use all other fields from contract presets."""
     config = json.loads(contracts_file.read_text(encoding="utf-8"))
     vendor = config["vendor"]
@@ -680,6 +688,40 @@ def run_quick_customer_mode(contracts_file: Path, output_dir: Path) -> None:
     print(f"Hours used: {money(total_hours)}")
     print(f"Output file: {filename}")
 
+    if send_email:
+        smtp_host = os.getenv("SMTP_HOST", "")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER", "")
+        smtp_password = os.getenv("SMTP_PASSWORD", "")
+        smtp_from = os.getenv("SMTP_FROM", vendor.get("email", ""))
+
+        if not smtp_host:
+            print("Cannot send email: SMTP_HOST not configured in .env")
+            return
+        if not customer.get("email"):
+            print("Cannot send email: customer email is missing in contracts file.")
+            return
+
+        subject = f"Invoice {invoice_number} - {vendor['name']}"
+        body = (
+            f"Hello {customer['name']},\n\n"
+            f"Please find attached invoice {invoice_number} for period {format_date(period_start)} to {format_date(period_end)}.\n\n"
+            f"Regards,\n{vendor['name']}"
+        )
+
+        send_invoice_email(
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_user=smtp_user,
+            smtp_password=smtp_password,
+            smtp_from=smtp_from,
+            customer_email=customer["email"],
+            subject=subject,
+            body=body,
+            attachment_path=filename,
+        )
+        print(f"Email sent to: {customer['email']}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate IT consulting invoices and optionally send by email.")
@@ -693,41 +735,51 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no-auto",
         action="store_true",
-        help="Disable automatic fallback to generate all when schedule produces zero invoices (email mode never auto-falls back)",
+        help="Disable automatic fallback behavior when schedule produces zero invoices",
     )
     args = parser.parse_args()
 
     load_env_file(Path(".env"))
 
     if args.quick:
-        run_quick_customer_mode(Path(args.contracts_file), Path(args.output_dir))
+        run_quick_customer_mode(Path(args.contracts_file), Path(args.output_dir), send_email=args.send_email)
         raise SystemExit(0)
 
     if args.wizard:
         run_interactive_wizard()
         raise SystemExit(0)
 
-    result = generate_and_optionally_send(
-        contracts_file=Path(args.contracts_file),
-        output_dir=Path(args.output_dir),
-        run_date=parse_date(args.run_date),
-        send_email=args.send_email,
-        ignore_schedule=args.ignore_schedule,
-    )
-
-    should_auto_fallback = (
-        not args.no_auto
-        and not args.send_email
-        and not args.ignore_schedule
-        and result["generated"] == 0
-    )
-
-    if should_auto_fallback:
-        print("Running automatic fallback: generating invoices for all customers...")
-        generate_and_optionally_send(
+    try:
+        result = generate_and_optionally_send(
             contracts_file=Path(args.contracts_file),
             output_dir=Path(args.output_dir),
             run_date=parse_date(args.run_date),
-            send_email=False,
-            ignore_schedule=True,
+            send_email=args.send_email,
+            ignore_schedule=args.ignore_schedule,
         )
+
+        should_auto_fallback = (
+            not args.no_auto
+            and not args.ignore_schedule
+            and result["generated"] == 0
+        )
+
+        if should_auto_fallback:
+            if args.send_email:
+                print("No scheduled invoices for email. Switching to quick 3-input mode...")
+                run_quick_customer_mode(Path(args.contracts_file), Path(args.output_dir), send_email=True)
+            else:
+                print("Running automatic fallback: generating invoices for all customers...")
+                generate_and_optionally_send(
+                    contracts_file=Path(args.contracts_file),
+                    output_dir=Path(args.output_dir),
+                    run_date=parse_date(args.run_date),
+                    send_email=False,
+                    ignore_schedule=True,
+                )
+    except RuntimeError as exc:
+        print(f"\nEmail send failed: {exc}")
+        raise SystemExit(1)
+    except smtplib.SMTPException as exc:
+        print(f"\nSMTP error: {exc}")
+        raise SystemExit(1)

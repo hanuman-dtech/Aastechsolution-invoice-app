@@ -13,7 +13,7 @@
     {
       "invoice_prefix": "TEK",
       "name": "Tekgence Canada Inc",
-      "email": "ap_canada@tekgence.com",
+      "email": "sait.devopstech@gmail.com",
       "address_lines": [
         "67 Yonge St Suite No. 701",
         "Toronto, Ontario, Canada, M5E 1J8"
@@ -34,7 +34,7 @@
     {
       "invoice_prefix": "ACM",
       "name": "Acme Digital Labs",
-      "email": "finance@acmedigital.com",
+      "email": "sait.devopstech@gmail.com",
       "address_lines": [
         "120 King St W",
         "Toronto, ON M5H 1J9"
@@ -56,7 +56,7 @@
     {
       "invoice_prefix": "NXT",
       "name": "NextWave Systems",
-      "email": "accounts@nextwave.com",
+      "email": "sait.devopstech@gmail.com",
       "address_lines": [
         "90 Wellington St",
         "Kitchener, ON N2G 2E9"
