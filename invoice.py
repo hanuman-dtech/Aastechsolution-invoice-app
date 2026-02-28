@@ -16,6 +16,121 @@ from reportlab.pdfgen import canvas
 MONEY_QUANT = Decimal("0.01")
 
 
+def load_env_file(env_path: Path = Path(".env")) -> None:
+    """Load KEY=VALUE pairs from .env into process environment if not already set."""
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def prompt_text(label: str, default: str | None = None, required: bool = True, format_hint: str | None = None) -> str:
+    hint = f" [{default}]" if default is not None else ""
+    fmt = f" ({format_hint})" if format_hint else ""
+    while True:
+        value = input(f"{label}{fmt}{hint}: ").strip()
+        if not value and default is not None:
+            return default
+        if value or not required:
+            return value
+        print("This field is required.")
+
+
+def prompt_date(label: str, default: str) -> date:
+    while True:
+        value = prompt_text(label, default=default, format_hint="YYYY-MM-DD")
+        try:
+            return parse_date(value)
+        except ValueError:
+            print("Invalid date format. Use YYYY-MM-DD (example: 2026-03-01).")
+
+
+def prompt_decimal(label: str, default: str) -> Decimal:
+    while True:
+        value = prompt_text(label, default=default, format_hint="number (example: 45 or 45.00)")
+        try:
+            return to_decimal(value)
+        except Exception:
+            print("Invalid number. Example valid inputs: 40, 40.5, 40.00")
+
+
+def prompt_int(label: str, default: int, min_value: int | None = None, max_value: int | None = None) -> int:
+    while True:
+        raw = prompt_text(label, default=str(default))
+        try:
+            value = int(raw)
+        except ValueError:
+            print("Please enter a whole number.")
+            continue
+
+        if min_value is not None and value < min_value:
+            print(f"Value must be >= {min_value}.")
+            continue
+        if max_value is not None and value > max_value:
+            print(f"Value must be <= {max_value}.")
+            continue
+        return value
+
+
+def prompt_choice(label: str, options: list[str], default_index: int = 1) -> str:
+    print(f"\n{label}")
+    for idx, option in enumerate(options, start=1):
+        default_mark = " (default)" if idx == default_index else ""
+        print(f"  {idx}) {option}{default_mark}")
+
+    while True:
+        selected = prompt_text("Choose option number", default=str(default_index), format_hint=f"1..{len(options)}")
+        try:
+            selected_idx = int(selected)
+            if 1 <= selected_idx <= len(options):
+                return options[selected_idx - 1]
+        except ValueError:
+            pass
+        print(f"Please choose a valid option number between 1 and {len(options)}.")
+
+
+def prompt_yes_no(label: str, default_yes: bool = True) -> bool:
+    default = "Y" if default_yes else "N"
+    while True:
+        raw = prompt_text(label, default=default, format_hint="Y/N").lower()
+        if raw in ("y", "yes"):
+            return True
+        if raw in ("n", "no"):
+            return False
+        print("Please answer Y or N.")
+
+
+def collect_multiline(label: str) -> list[str]:
+    print(f"\n{label}")
+    print("Enter one line at a time. Press Enter on an empty line to finish.")
+    lines: list[str] = []
+    while True:
+        line = input(f"  Line {len(lines) + 1}: ").strip()
+        if not line:
+            break
+        lines.append(line)
+    if not lines:
+        print("No lines entered. Using one blank line.")
+        lines.append("")
+    return lines
+
+
+def find_customer_by_name(customers: list[dict], customer_name: str) -> dict | None:
+    normalized = customer_name.strip().lower()
+    for customer in customers:
+        if customer.get("name", "").strip().lower() == normalized:
+            return customer
+    return None
+
+
 def to_decimal(value) -> Decimal:
     if isinstance(value, Decimal):
         return value
@@ -368,20 +483,251 @@ def generate_and_optionally_send(
     if send_email:
         print(f"Sent {emailed} invoice email(s).")
 
+    return {
+        "generated": generated,
+        "emailed": emailed,
+        "skipped": skipped,
+    }
+
+
+def run_interactive_wizard() -> None:
+    print("\n=== Invoice Wizard (Q&A mode) ===")
+    print("We'll ask questions and generate invoices with your answers.")
+
+    mode = prompt_choice(
+        "What do you want to generate?",
+        [
+            "From contracts file (scheduled customers only)",
+            "From contracts file (all customers)",
+            "Single custom customer invoice",
+        ],
+        default_index=1,
+    )
+
+    run_date = prompt_date("Run date", default=date.today().isoformat())
+    output_dir = Path(prompt_text("Output folder", default="generated_invoices"))
+
+    if mode.startswith("From contracts file"):
+        contracts_file = Path(prompt_text("Contracts file path", default="contracts.sample.json"))
+        send_email = prompt_yes_no("Send email after generation?", default_yes=False)
+        ignore_schedule = "all customers" in mode
+
+        if send_email and not os.getenv("SMTP_HOST"):
+            print("\nSMTP_HOST is not configured. Add SMTP values in .env first for email sending.")
+            send_email = False
+
+        result = generate_and_optionally_send(
+            contracts_file=contracts_file,
+            output_dir=output_dir,
+            run_date=run_date,
+            send_email=send_email,
+            ignore_schedule=ignore_schedule,
+        )
+
+        if result["generated"] == 0 and not ignore_schedule:
+            if prompt_yes_no("No matches found. Generate all customers now?", default_yes=True):
+                generate_and_optionally_send(
+                    contracts_file=contracts_file,
+                    output_dir=output_dir,
+                    run_date=run_date,
+                    send_email=False,
+                    ignore_schedule=True,
+                )
+        return
+
+    # Single custom invoice mode
+    print("\nProvide vendor/company details")
+    vendor_name = prompt_text("Vendor name", default="AAS Tech Solutions Corp")
+    vendor_email = prompt_text("Vendor email", default="contact@aastechsolutions.com")
+    vendor_hst = prompt_text("Vendor HST number", default="733392369RT0001")
+    vendor_address_lines = collect_multiline("Vendor address lines")
+
+    print("\nProvide customer details")
+    customer_name = prompt_text("Customer name")
+    customer_email = prompt_text("Customer email", required=False)
+    customer_address_lines = collect_multiline("Customer address lines")
+    contractor_name = prompt_text("Contractor name", default="Anusha Veeramalla")
+    service_location = prompt_text("Service location", default="Ontario, Canada")
+    invoice_prefix = prompt_text("Invoice prefix", default="INV")
+
+    frequency = prompt_choice("Billing frequency", ["weekly", "biweekly", "monthly"], default_index=3)
+    period_start, period_end = compute_billing_period(run_date, frequency)
+
+    print("\nProvide billing amounts")
+    total_hours = prompt_decimal("Total hours", default="40.00")
+    rate_per_hour = prompt_decimal("Rate per hour", default="45.00")
+    hst_rate = prompt_decimal("HST rate", default="0.13")
+    extra_fees = prompt_decimal("Extra fees", default="0.00")
+    extra_fees_label = prompt_text("Extra fees label", default="Other Fees")
+    payment_terms = prompt_text("Payment terms", default=frequency.title())
+
+    invoice_number = f"{invoice_prefix}-{run_date.strftime('%Y%m%d')}-001"
+    filename = output_dir / f"{invoice_number}.pdf"
+
+    generate_invoice_pdf(
+        filename=str(filename),
+        invoice_number=invoice_number,
+        invoice_date=run_date.strftime("%d/%m/%Y"),
+        vendor_name=vendor_name,
+        vendor_email=vendor_email,
+        vendor_address_lines=vendor_address_lines,
+        vendor_hst_number=vendor_hst,
+        contractor_name=contractor_name,
+        customer_name=customer_name,
+        customer_address_lines=customer_address_lines,
+        service_location=service_location,
+        period_start=format_date(period_start),
+        period_end=format_date(period_end),
+        total_hours=total_hours,
+        rate_per_hour=rate_per_hour,
+        hst_rate=hst_rate,
+        payment_terms=payment_terms,
+        extra_fees=extra_fees,
+        extra_fees_label=extra_fees_label,
+    )
+
+    if prompt_yes_no("Email this invoice now?", default_yes=False):
+        smtp_host = os.getenv("SMTP_HOST", "")
+        smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        smtp_user = os.getenv("SMTP_USER", "")
+        smtp_password = os.getenv("SMTP_PASSWORD", "")
+        smtp_from = os.getenv("SMTP_FROM", vendor_email)
+
+        if not smtp_host:
+            print("Cannot send email: SMTP_HOST not configured in .env")
+            return
+        if not customer_email:
+            print("Cannot send email: customer email is empty.")
+            return
+
+        subject = f"Invoice {invoice_number} - {vendor_name}"
+        body = (
+            f"Hello {customer_name},\n\n"
+            f"Please find attached invoice {invoice_number} for period {format_date(period_start)} to {format_date(period_end)}.\n\n"
+            f"Regards,\n{vendor_name}"
+        )
+
+        send_invoice_email(
+            smtp_host=smtp_host,
+            smtp_port=smtp_port,
+            smtp_user=smtp_user,
+            smtp_password=smtp_password,
+            smtp_from=smtp_from,
+            customer_email=customer_email,
+            subject=subject,
+            body=body,
+            attachment_path=filename,
+        )
+        print(f"Email sent to: {customer_email}")
+
+
+def run_quick_customer_mode(contracts_file: Path, output_dir: Path) -> None:
+    """Prompt only for customer name, run date, and hours; use all other fields from contract presets."""
+    config = json.loads(contracts_file.read_text(encoding="utf-8"))
+    vendor = config["vendor"]
+    customers = config["customers"]
+
+    print("\n=== Quick Invoice Mode (3 inputs) ===")
+    print("Only provide: customer name, run date, and hours.")
+
+    while True:
+        customer_name = prompt_text("Customer name", required=True)
+        customer = find_customer_by_name(customers, customer_name)
+        if customer:
+            break
+        print("Customer not found. Available customers:")
+        for c in customers:
+            print(f"  - {c.get('name', 'Unknown')}")
+
+    run_date = prompt_date("Run date", default=date.today().isoformat())
+    total_hours = prompt_decimal("Total hours", default=str(customer.get("hours", "40.00")))
+
+    frequency = customer.get("frequency", "monthly")
+    period_start, period_end = compute_billing_period(run_date, frequency)
+    rate_per_hour = to_decimal(customer.get("rate_per_hour", "0"))
+    hst_rate = to_decimal(customer.get("hst_rate", "0.13"))
+    extra_fees = to_decimal(customer.get("extra_fees", "0.00"))
+    extra_fees_label = customer.get("extra_fees_label", "Other Fees")
+
+    invoice_number = f"{customer.get('invoice_prefix', 'INV')}-{run_date.strftime('%Y%m%d')}-001"
+    filename = output_dir / f"{invoice_number}.pdf"
+
+    generate_invoice_pdf(
+        filename=str(filename),
+        invoice_number=invoice_number,
+        invoice_date=run_date.strftime("%d/%m/%Y"),
+        vendor_name=vendor["name"],
+        vendor_email=vendor["email"],
+        vendor_address_lines=vendor["address_lines"],
+        vendor_hst_number=vendor["hst_number"],
+        contractor_name=customer.get("contractor_name", vendor.get("default_contractor", "Contractor")),
+        customer_name=customer["name"],
+        customer_address_lines=customer["address_lines"],
+        service_location=customer.get("service_location", "Ontario, Canada"),
+        period_start=format_date(period_start),
+        period_end=format_date(period_end),
+        total_hours=total_hours,
+        rate_per_hour=rate_per_hour,
+        hst_rate=hst_rate,
+        payment_terms=customer.get("payment_terms", frequency.title()),
+        extra_fees=extra_fees,
+        extra_fees_label=extra_fees_label,
+    )
+
+    print("\nQuick mode complete ✅")
+    print(f"Customer: {customer['name']}")
+    print(f"Run date: {run_date.isoformat()}")
+    print(f"Hours used: {money(total_hours)}")
+    print(f"Output file: {filename}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate IT consulting invoices and optionally send by email.")
-    parser.add_argument("--contracts-file", default="contracts.sample.json", help="Path to customer contracts JSON file")
-    parser.add_argument("--output-dir", default="generated_invoices", help="Directory for generated PDF invoices")
-    parser.add_argument("--run-date", default=date.today().isoformat(), help="Run date in YYYY-MM-DD")
-    parser.add_argument("--ignore-schedule", action="store_true", help="Generate for all customers regardless of schedule")
-    parser.add_argument("--send-email", action="store_true", help="Send generated invoices via SMTP")
+    parser.add_argument("-c", "--contracts-file", default="contracts.sample.json", help="Path to customer contracts JSON file")
+    parser.add_argument("-o", "--output-dir", default="generated_invoices", help="Directory for generated PDF invoices")
+    parser.add_argument("-d", "--run-date", default=date.today().isoformat(), help="Run date in YYYY-MM-DD")
+    parser.add_argument("-w", "--wizard", action="store_true", help="Interactive Q&A mode with guided options")
+    parser.add_argument("-q", "--quick", action="store_true", help="Quick prompt mode: customer name + run date + hours")
+    parser.add_argument("--ignore-schedule", "--all", action="store_true", help="Generate for all customers regardless of schedule")
+    parser.add_argument("--send-email", "--email", action="store_true", help="Send generated invoices via SMTP")
+    parser.add_argument(
+        "--no-auto",
+        action="store_true",
+        help="Disable automatic fallback to generate all when schedule produces zero invoices (email mode never auto-falls back)",
+    )
     args = parser.parse_args()
 
-    generate_and_optionally_send(
+    load_env_file(Path(".env"))
+
+    if args.quick:
+        run_quick_customer_mode(Path(args.contracts_file), Path(args.output_dir))
+        raise SystemExit(0)
+
+    if args.wizard:
+        run_interactive_wizard()
+        raise SystemExit(0)
+
+    result = generate_and_optionally_send(
         contracts_file=Path(args.contracts_file),
         output_dir=Path(args.output_dir),
         run_date=parse_date(args.run_date),
         send_email=args.send_email,
         ignore_schedule=args.ignore_schedule,
     )
+
+    should_auto_fallback = (
+        not args.no_auto
+        and not args.send_email
+        and not args.ignore_schedule
+        and result["generated"] == 0
+    )
+
+    if should_auto_fallback:
+        print("Running automatic fallback: generating invoices for all customers...")
+        generate_and_optionally_send(
+            contracts_file=Path(args.contracts_file),
+            output_dir=Path(args.output_dir),
+            run_date=parse_date(args.run_date),
+            send_email=False,
+            ignore_schedule=True,
+        )

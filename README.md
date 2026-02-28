@@ -1,16 +1,16 @@
 # IT Consulting Invoice Automation
 
-This script generates customer invoices based on per-customer billing frequency, hours, rates, and HST, and can optionally email PDFs to each customer.
+Generate PDF invoices for consulting customers using preset contract data (hours/rate/HST/frequency), with optional SMTP email delivery.
 
-## Files
+## Project files
 
-- `invoice.py` - main generator + email dispatcher
-- `contracts.sample.json` - sample customer contract/frequency configuration
-- `.env.example` - SMTP placeholders template for email sending
+- `invoice.py` — main generator + interactive modes + optional email sender
+- `contracts.sample.json` — vendor + customer contract presets
+- `.env.example` — SMTP configuration template for email sending
 
-## 1) Configure customer contracts
+## Configure contract presets
 
-Edit `contracts.sample.json` with your real customers and terms.
+Edit `contracts.sample.json` with your real values.
 
 Supported frequencies:
 
@@ -20,33 +20,68 @@ Supported frequencies:
 
 Schedule fields:
 
-- Weekly: `billing_weekday` (0=Mon..6=Sun)
+- Weekly: `billing_weekday` (`0=Mon .. 6=Sun`)
 - Biweekly: `billing_weekday`, `anchor_date` (`YYYY-MM-DD`)
-- Monthly: `billing_day` (1..31)
+- Monthly: `billing_day` (`1..31`)
 
-## 2) Generate invoices only (no email)
+## Fastest ways to run
 
-Run:
+### 1) One-command auto mode
 
-`python3 invoice.py --contracts-file contracts.sample.json --output-dir generated_invoices`
+`python3 invoice.py`
 
-Optional run date override:
+Behavior:
 
-`python3 invoice.py --contracts-file contracts.sample.json --run-date 2026-03-01`
+- Uses `contracts.sample.json`
+- Uses today's date
+- Writes PDFs to `generated_invoices/`
+- If no customer matches schedule, it automatically generates all customers (PDF only, no email)
 
-## 3) Generate and send emails
+### 2) Quick 3-input mode (your requested flow)
 
-1. Copy `.env.example` to `.env` and update SMTP values.
-2. Export env variables (Linux/macOS):
+`python3 invoice.py --quick`
 
-`set -a; source .env; set +a`
+Prompts only:
 
-3. Run with `--send-email`:
+1. Customer name
+2. Run date (`YYYY-MM-DD`)
+3. Total hours
 
-`python3 invoice.py --contracts-file contracts.sample.json --send-email`
+Everything else comes from `contracts.sample.json` presets (rate, HST, address, fees, payment terms, etc.).
+
+### 3) Full interactive wizard
+
+`python3 invoice.py --wizard`
+
+Guided options with format hints, including:
+
+- contracts: scheduled customers only
+- contracts: all customers
+- single custom customer invoice
+
+## Explicit CLI usage (advanced)
+
+- Generate from contracts:
+	- `python3 invoice.py --contracts-file contracts.sample.json --output-dir generated_invoices`
+- Use specific run date:
+	- `python3 invoice.py --run-date 2026-03-01`
+- Force all customers:
+	- `python3 invoice.py --all`
+- Disable auto-fallback behavior:
+	- `python3 invoice.py --no-auto`
+
+## Email sending
+
+1. Copy `.env.example` to `.env` and fill SMTP values.
+2. Run:
+	 - `python3 invoice.py --send-email`
+
+Notes:
+
+- `.env` is auto-loaded by the script.
+- Email mode never auto-falls back to all customers; it follows schedule unless `--all` is provided.
 
 ## Notes
 
-- The script only generates invoices for customers whose frequency/schedule matches `run-date`.
-- PDFs are attached to outbound emails.
-- Monetary values are handled using `Decimal` with 2-decimal HALF_UP rounding.
+- Money values use `Decimal` with 2-digit HALF_UP rounding.
+- Generated files are saved in `generated_invoices/` by default.
