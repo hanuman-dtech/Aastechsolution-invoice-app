@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance } from "axios";
 import type {
+  BillingFrequency,
   Customer,
   CustomerCreate,
   CustomerUpdate,
@@ -190,10 +191,13 @@ class ApiClient {
     next_invoice_date: string;
     period_start: string;
     period_end: string;
-    estimated_hours: number;
     estimated_amount: number;
+    customer_id: string;
+    customer_name: string;
+    frequency: BillingFrequency;
+    message: string;
   }> {
-    const { data } = await this.client.get(`/customers/${customerId}/next-invoice`);
+    const { data } = await this.client.get(`/customers/${customerId}/next-invoice-preview`);
     return data;
   }
 

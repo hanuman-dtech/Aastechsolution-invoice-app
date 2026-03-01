@@ -69,7 +69,7 @@ export interface Customer extends BaseEntity {
   service_location: string;
   is_active: boolean;
   contract?: Contract;
-  schedule_config?: ScheduleConfig;
+  schedule?: ScheduleConfig;
 }
 
 export interface CustomerCreate {

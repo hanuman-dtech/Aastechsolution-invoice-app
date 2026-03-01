@@ -29,6 +29,11 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def get_password_hash(password: str) -> str:
+    """Backward-compatible alias for password hashing."""
+    return hash_password(password)
+
+
 def generate_password(length: int = 16) -> str:
     """Generate a random password."""
     return secrets.token_urlsafe(length)
@@ -79,6 +84,11 @@ _fernet = Fernet(_get_encryption_key())
 def encrypt_value(plaintext: str) -> str:
     """Encrypt a string value for storage."""
     return _fernet.encrypt(plaintext.encode()).decode()
+
+
+def encrypt_smtp_password(plaintext: str) -> str:
+    """Backward-compatible alias for SMTP password encryption."""
+    return encrypt_value(plaintext)
 
 
 def decrypt_value(ciphertext: str) -> str:
