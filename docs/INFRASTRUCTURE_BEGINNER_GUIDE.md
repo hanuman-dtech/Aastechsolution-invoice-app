@@ -51,6 +51,11 @@
     - [Phase 12: Harden .gitignore](#phase-12-harden-gitignore)
     - [Phase 13: Commit, Push, and Open Pull Request](#phase-13-commit-push-and-open-pull-request)
     - [Phase 14: What Happens Now (Automatically)](#phase-14-what-happens-now-automatically)
+14. [CI Failures After First Push — What Broke and How We Fixed It](#14-ci-failures-after-first-push--what-broke-and-how-we-fixed-it)
+    - [Error 1: Trivy — Key Vault network_acls (AVD-AZU-0013)](#error-1-trivy-iac-scan--critical-avd-azu-0013)
+    - [Error 2: Dependency Review — Dependency Graph not enabled](#error-2-dependency-review--dependency-graph-not-enabled)
+    - [Error 3: Terraform init — Azure CLI auth vs Service Principal](#error-3-terraform-init--azure-cli-auth-is-only-supported-as-a-user)
+    - [Error 4: Prod plan blocked — Branch not allowed to deploy](#error-4-prod-plan-blocked--branch-not-allowed-to-deploy-to-prod)
 
 ---
 
@@ -1792,6 +1797,335 @@ Merge to main
 | 3 | **Create `terraform.tfvars`** | Copy from `.example`, fill in real subscription/tenant IDs for local testing |
 | 4 | **Add Entra groups for RBAC** | Create groups in Entra ID, add their Object IDs to `terraform.tfvars` |
 | 5 | **Rotate SMTP password** | Go to Apple ID > Sign-In & Security > App-Specific Passwords and revoke/recreate |
+
+---
+
+## 14. CI Failures After First Push — What Broke and How We Fixed It
+
+After pushing PR #5, GitHub Actions ran the CI workflows automatically. **Two jobs failed.** This section explains what happened, why, and the exact fix for each.
+
+---
+
+### Error 1: Trivy IaC Scan — CRITICAL: AVD-AZU-0013
+
+**Which workflow**: `terraform-pr.yml` → `quality-gates` job → Trivy IaC scan step
+
+**The error message**:
+
+```
+CRITICAL: Vault network ACL does not block access by default.
+
+Network ACLs allow you to reduce your exposure to risk by limiting what
+can access your key vault.
+
+The default action of the Network ACL should be set to deny for when IPs
+are not matched. Azure services can be allowed to bypass.
+
+See https://avd.aquasec.com/misconfig/avd-azu-0013
+
+ modules/security/main.tf:12-23
+   via envs/dev/main.tf:69-83 (module.security)
+   via envs/prod/main.tf:69-83 (module.security)
+```
+
+**What this means in plain English**:
+
+Trivy is a security scanner. It reads our Terraform files and checks them against a database of known misconfigurations. Rule `AVD-AZU-0013` says:
+
+> "Every Azure Key Vault must have a `network_acls` block that explicitly sets `default_action = "Deny"`."
+
+Our Key Vault resource already had `public_network_access_enabled = false` (which blocks public internet access) and a Private Endpoint (which means only our VNet can reach it). But Trivy doesn't just check if the vault is *probably* safe — it checks if every specific security control is *explicitly declared*. Without a `network_acls` block, the implicit default is `Allow`, which Trivy flags as CRITICAL.
+
+**Why Trivy was right**: Defense-in-depth. Even though public access was disabled, explicitly setting `network_acls.default_action = "Deny"` is a second layer. If someone accidentally re-enables public access later, the network ACL would still block unauthorized IPs. Belt AND suspenders.
+
+**The fix** — Added a `network_acls` block to the Key Vault resource in `infra/terraform/modules/security/main.tf`:
+
+```hcl
+# BEFORE (lines 12-23):
+resource "azurerm_key_vault" "this" {
+  name                          = var.key_vault_name
+  resource_group_name           = var.resource_group_name
+  location                      = var.location
+  tenant_id                     = var.tenant_id
+  sku_name                      = "premium"
+  rbac_authorization_enabled    = true
+  public_network_access_enabled = false
+  purge_protection_enabled      = true
+  soft_delete_retention_days    = 90
+  tags                          = var.tags
+}
+
+# AFTER (added 4 lines):
+resource "azurerm_key_vault" "this" {
+  name                          = var.key_vault_name
+  resource_group_name           = var.resource_group_name
+  location                      = var.location
+  tenant_id                     = var.tenant_id
+  sku_name                      = "premium"
+  rbac_authorization_enabled    = true
+  public_network_access_enabled = false
+  purge_protection_enabled      = true
+  soft_delete_retention_days    = 90
+  tags                          = var.tags
+
+  network_acls {
+    default_action = "Deny"    # Block all traffic that doesn't match a rule
+    bypass         = "AzureServices"  # Allow trusted Azure services (e.g., backup, logging)
+  }
+}
+```
+
+**What each field means**:
+
+| Field | Value | Meaning |
+|-------|-------|---------|
+| `default_action` | `"Deny"` | If a request doesn't match any IP/VNet rule, reject it |
+| `bypass` | `"AzureServices"` | Trusted Microsoft services (like Azure Backup, Diagnostics, Disk Encryption) can still reach the vault even with Deny. This is required for many Azure features to function |
+
+**Validation**:
+
+```bash
+terraform -chdir=infra/terraform/envs/dev init -backend=false -input=false
+terraform -chdir=infra/terraform/envs/dev validate
+# Result: "Success! The configuration is valid."
+```
+
+---
+
+### Error 2: Dependency Review — "Dependency graph not enabled"
+
+**Which workflow**: `dependency-review.yml` → `dependency-review` job
+
+**The error message**:
+
+```
+Error: Dependency review is not supported on this repository.
+Please ensure that Dependency graph is enabled, see
+https://github.com/hanuman-dtech/Aastechsolution-invoice-app/settings/security_analysis
+```
+
+**What this means in plain English**:
+
+The `actions/dependency-review-action@v4` GitHub Action checks if any new dependencies introduced in a PR have known security vulnerabilities. To do this, it needs GitHub's **Dependency Graph** feature to be enabled. The Dependency Graph parses your `package.json`, `requirements.txt`, etc. and builds a map of all dependencies.
+
+On new repositories (or repos that were private and made public), the Dependency Graph is **not enabled by default**. Without it, the action has nothing to scan, so it errors out.
+
+**Why we have this workflow**: Our DevOps rules (`ORG_DEVOPS_RULES.md`) say pipelines must "fail on HIGH/CRITICAL vulnerabilities." The dependency-review action enforces this for third-party package vulnerabilities (npm, pip, etc.), while Trivy handles infrastructure misconfigurations.
+
+**The fix** — Enabled Vulnerability Alerts (which automatically enables the Dependency Graph) via the GitHub API:
+
+```bash
+gh api --method PUT repos/hanuman-dtech/Aastechsolution-invoice-app/vulnerability-alerts
+```
+
+**What this command does**:
+1. Calls the GitHub REST API endpoint `PUT /repos/{owner}/{repo}/vulnerability-alerts`
+2. This enables **Dependabot Vulnerability Alerts** on the repository
+3. Enabling vulnerability alerts **automatically enables the Dependency Graph** (it's a prerequisite)
+
+**Result**: GitHub immediately scanned the repository and found 11 existing vulnerabilities:
+
+```
+GitHub found 11 vulnerabilities on hanuman-dtech/Aastechsolution-invoice-app's
+default branch (1 critical, 6 high, 3 moderate, 1 low). To find out more, visit:
+https://github.com/hanuman-dtech/Aastechsolution-invoice-app/security/dependabot
+```
+
+These are in the existing application dependencies (npm packages in the frontend, pip packages in the backend). Dependabot will start opening PRs to fix them automatically.
+
+**You can also do this in the GitHub UI**:
+1. Go to your repo → Settings → Code security and analysis
+2. Turn on "Dependency graph" → Enable
+3. Turn on "Dependabot alerts" → Enable
+
+---
+
+### The Commit
+
+Both fixes were committed and pushed together:
+
+```bash
+git add infra/terraform/modules/security/main.tf docs/INFRASTRUCTURE_BEGINNER_GUIDE.md
+git commit -m "fix: add Key Vault network_acls deny-by-default (AVD-AZU-0013) and expand beginner guide"
+git push origin chore/ui-backend-followup-20260301
+```
+
+**Note**: The push was initially rejected with `non-fast-forward` because the remote branch had newer commits. This was resolved by rebasing:
+
+```bash
+git stash                   # Save unstaged changes temporarily
+git pull --rebase origin chore/ui-backend-followup-20260301  # Replay our commit on top of remote
+git stash pop               # Restore unstaged changes
+git push origin chore/ui-backend-followup-20260301           # Now push succeeds
+```
+
+**Why `--rebase` instead of `merge`**: Our branch protection requires `required_linear_history = true`, which means no merge commits. Rebase replays your commits on top of the remote branch, keeping history linear and clean.
+
+---
+
+### Lesson Learned
+
+| What | Lesson |
+|------|--------|
+| **Trivy scans are strict** | Even if a resource is secured by other means (private endpoints), Trivy checks each security control independently. Always add explicit deny-by-default configurations |
+| **Dependency Graph must be enabled** | New repos don't have it on by default. Enable it before your first PR, or the dependency-review workflow will fail |
+| **CI catches real issues** | Both of these were legitimate security gaps. The pipeline did exactly what it was designed to do — block the PR until the issues were fixed |
+
+---
+
+### CI Failure Round 2: Terraform OIDC Auth + Prod Environment Protection
+
+After pushing the Trivy and Dependency Graph fixes, CI ran again. Quality-gates and dependency-review passed, but **two new errors** appeared in the `plan` job.
+
+---
+
+#### Error 3: Terraform init — "Azure CLI auth is only supported as a User"
+
+**Which workflow**: `terraform-pr.yml` → `plan` job → Terraform init step
+
+**The error message**:
+
+```
+Error: Error building ARM Config: Authenticating using the Azure CLI
+is only supported as a User (not a Service Principal).
+
+To authenticate to Azure using a Service Principal, you can use the
+separate 'Authenticate using a Service Principal' auth method.
+```
+
+**What this means in plain English**:
+
+The workflow has two steps that authenticate to Azure:
+
+1. `azure/login@v2` — Logs in using our OIDC federated credential. This creates a **Service Principal** session in the Azure CLI.
+2. `terraform init` — Tries to connect to the remote state backend (Azure Blob Storage).
+
+By default, the azurerm Terraform provider and backend try to authenticate using the Azure CLI (`use_cli = true`). But the CLI auth mode only works for **human user** sessions, not Service Principal sessions. When `azure/login` did OIDC login, it created a SP session in the CLI, and Terraform said "I can't use CLI auth with a Service Principal."
+
+**The root cause**: Terraform didn't know it should use **OIDC directly** — it was falling back to CLI auth and finding an incompatible session.
+
+**The fix** — Added environment variables to tell Terraform to use OIDC auth directly, and passed OIDC config to the backend:
+
+```yaml
+# BEFORE (plan job):
+env:
+  TF_IN_AUTOMATION: true
+
+# AFTER (plan job):
+env:
+  TF_IN_AUTOMATION: true
+  ARM_USE_OIDC: true          # Tell provider to use OIDC for auth
+  ARM_USE_CLI: false           # Don't try CLI auth at all
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+```yaml
+# BEFORE (init step):
+terraform init \
+  -backend-config="use_azuread_auth=true"
+
+# AFTER (init step):
+terraform init \
+  -backend-config="use_azuread_auth=true" \
+  -backend-config="use_oidc=true" \
+  -backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}" \
+  -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+  -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+```
+
+**What each setting does**:
+
+| Setting | Where | Meaning |
+|---------|-------|---------|
+| `ARM_USE_OIDC=true` | Env var → Provider | Terraform requests an OIDC token directly from GitHub (not through CLI) |
+| `ARM_USE_CLI=false` | Env var → Provider | Don't even attempt CLI auth (eliminates the SP-in-CLI error) |
+| `ARM_CLIENT_ID` | Env var → Provider | Which App Registration to authenticate as |
+| `ARM_TENANT_ID` | Env var → Provider | Which Azure AD tenant to authenticate against |
+| `ARM_SUBSCRIPTION_ID` | Env var → Provider | Which subscription to manage |
+| `use_oidc=true` | Backend config | Backend also uses OIDC to access the state blob |
+| `client_id`, `tenant_id`, `subscription_id` | Backend config | Backend needs these separately from the provider |
+
+**How Terraform OIDC works differently from `azure/login`**:
+
+```
+azure/login approach (what we had — broken for Terraform):
+  GitHub OIDC Token → azure/login action → az CLI SP session → Terraform tries CLI auth → FAILS
+
+Terraform native OIDC approach (the fix):
+  ARM_USE_OIDC=true → Terraform requests OIDC token directly from GitHub
+                     → Exchanges with Azure AD → Uses the token for API calls → WORKS
+```
+
+The same fix was applied to `terraform-apply.yml` (both `apply-dev` and `apply-prod` jobs).
+
+---
+
+#### Error 4: Prod plan blocked — "Branch not allowed to deploy to prod"
+
+**Which workflow**: `terraform-pr.yml` → `plan` job (prod matrix entry)
+
+**The error message**:
+
+```
+Branch "refs/pull/5/merge" is not allowed to deploy to prod due to
+environment protection rules.
+```
+
+**What this means in plain English**:
+
+The `plan` job had `environment: ${{ matrix.environment }}`, which for the prod matrix entry becomes `environment: prod`. When a GitHub Actions job references an environment, GitHub enforces that environment's **deployment branch policy**.
+
+We configured the prod environment with `deployment_branch_policy.protected_branches = true`, meaning only the `main` branch can "deploy" to prod. A PR branch (`refs/pull/5/merge`) is not main, so GitHub blocked it.
+
+**But wait — `terraform plan` doesn't deploy anything!** It only previews what *would* change. The problem is that using `environment:` in a job tells GitHub "this is a deployment," even if the job just runs `terraform plan`.
+
+**The fix** — Removed `environment: ${{ matrix.environment }}` from the PR plan job:
+
+```yaml
+# BEFORE:
+plan:
+  runs-on: ubuntu-latest
+  needs: quality-gates
+  strategy:
+    matrix:
+      environment: [dev, prod]
+  environment: ${{ matrix.environment }}  # ← This triggers deployment protection
+  env:
+    TF_IN_AUTOMATION: true
+
+# AFTER:
+plan:
+  runs-on: ubuntu-latest
+  needs: quality-gates
+  strategy:
+    matrix:
+      environment: [dev, prod]
+  # No environment: reference — plans are not deployments
+  env:
+    TF_IN_AUTOMATION: true
+    ARM_USE_OIDC: true
+    ARM_USE_CLI: false
+    ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+    ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+    ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+**Why this works with OIDC**: Without `environment:`, the GitHub OIDC token's subject claim becomes `repo:hanuman-dtech/Aastechsolution-invoice-app:pull_request` (instead of `...:environment:prod`). This matches our `github-actions-pr` federated credential, which was created specifically for pull requests.
+
+**The `terraform-apply.yml` workflow still keeps `environment:`** — that workflow runs on `main` after merge, so it's an actual deployment and should respect environment protection rules.
+
+---
+
+### Lesson Learned (Round 2)
+
+| What | Lesson |
+|------|--------|
+| **Terraform needs explicit OIDC config** | `azure/login` sets up the CLI, but Terraform can't use CLI auth for SP sessions. Set `ARM_USE_OIDC=true` + `ARM_USE_CLI=false` as env vars |
+| **Backend needs OIDC config separately** | The `azurerm` backend has its own auth config — pass `use_oidc=true`, `client_id`, `tenant_id`, `subscription_id` as `-backend-config` flags |
+| **Don't use `environment:` for plan jobs** | `environment:` triggers deployment protection rules. Plans are read-only — they don't need environment gates. Only use `environment:` in apply/deploy jobs |
+| **OIDC subject changes with `environment:`** | With `environment: prod`, subject = `...:environment:prod`. Without it, subject = `...:pull_request`. Make sure you have matching federated credentials for each |
 
 ---
 
