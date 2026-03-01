@@ -1,6 +1,24 @@
+# Environment files (NEVER commit secrets)
 .env
+.env.*
+!.env.example
+dx.env
 generated_invoices/
 invoice_*.pdf
 __pycache__/
 *.pyc
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+*.tfplan
+*.tfplan.*
+.terraform.lock.hcl
+**/backend.hcl
+!**/backend.hcl.example
+.terraform.lock.hcl
 node_modules/

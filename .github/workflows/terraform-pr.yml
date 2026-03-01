@@ -1,0 +1,133 @@
+name: terraform-pr
+
+on:
+  pull_request:
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-pr.yml"
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    env:
+      TF_IN_AUTOMATION: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform fmt check
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+
+      - name: Terraform init/validate (all envs)
+        run: |
+          set -euo pipefail
+          for ENV in dev prod; do
+            terraform -chdir=infra/terraform/envs/${ENV} init -backend=false
+            terraform -chdir=infra/terraform/envs/${ENV} validate
+          done
+
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Run TFLint
+        run: |
+          set -euo pipefail
+          for ENV in dev prod; do
+            tflint --chdir infra/terraform/envs/${ENV}
+          done
+
+      - name: Trivy IaC scan (HIGH/CRITICAL fail)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: config
+          scan-ref: infra/terraform
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          ignore-unfixed: true
+
+  plan:
+    runs-on: ubuntu-latest
+    needs: quality-gates
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, prod]
+
+    env:
+      TF_IN_AUTOMATION: true
+      ARM_USE_OIDC: true
+      ARM_USE_CLI: false
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform init (remote backend)
+        run: |
+          terraform -chdir=infra/terraform/envs/${{ matrix.environment }} init \
+            -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}" \
+            -backend-config="key=invoice-enterprise/${{ matrix.environment }}.tfstate" \
+            -backend-config="use_azuread_auth=true" \
+            -backend-config="use_oidc=true" \
+            -backend-config="client_id=${{ secrets.AZURE_CLIENT_ID }}" \
+            -backend-config="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+            -backend-config="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+
+      - name: Terraform plan
+        run: |
+          terraform -chdir=infra/terraform/envs/${{ matrix.environment }} plan \
+            -input=false \
+            -lock=true \
+            -lock-timeout=5m \
+            -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}" \
+            -out=tfplan
+
+      - name: Render plan text
+        run: |
+          terraform -chdir=infra/terraform/envs/${{ matrix.environment }} show -no-color tfplan > infra/terraform/envs/${{ matrix.environment }}/tfplan.txt
+
+      - name: Upload plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan-${{ matrix.environment }}
+          path: |
+            infra/terraform/envs/${{ matrix.environment }}/tfplan
+            infra/terraform/envs/${{ matrix.environment }}/tfplan.txt
+          retention-days: 14

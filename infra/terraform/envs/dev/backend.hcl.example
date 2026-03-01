@@ -1,0 +1,5 @@
+resource_group_name  = "rg-tfstate-shared"
+storage_account_name = "sttfstateprod001"
+container_name       = "tfstate"
+key                  = "invoice-enterprise/dev.tfstate"
+use_azuread_auth     = true
