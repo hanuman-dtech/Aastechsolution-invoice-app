@@ -124,7 +124,7 @@ jobs:
           terraform -chdir=infra/terraform/envs/${{ matrix.environment }} show -no-color tfplan > infra/terraform/envs/${{ matrix.environment }}/tfplan.txt
 
       - name: Upload plan artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: terraform-plan-${{ matrix.environment }}
           path: |
