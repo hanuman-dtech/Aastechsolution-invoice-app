@@ -1,0 +1,19 @@
+# VCS
+.git
+.gitignore
+
+# Node artifacts
+node_modules/
+.next/
+out/
+coverage/
+
+# Local env/config
+.env
+.env.*
+
+# Build/editor noise
+*.log
+.DS_Store
+.idea/
+.vscode/

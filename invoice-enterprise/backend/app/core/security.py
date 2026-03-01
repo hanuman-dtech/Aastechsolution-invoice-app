@@ -29,6 +29,11 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def get_password_hash(password: str) -> str:
+    """Backward-compatible alias for password hashing."""
+    return hash_password(password)
+
+
 def generate_password(length: int = 16) -> str:
     """Generate a random password."""
     return secrets.token_urlsafe(length)
@@ -69,7 +74,8 @@ def decode_token(token: str) -> dict[str, Any] | None:
 def _get_encryption_key() -> bytes:
     """Derive a Fernet key from the secret key."""
     # Use SHA256 to get consistent 32 bytes, then base64 encode for Fernet
-    key_bytes = hashlib.sha256(settings.secret_key.encode()).digest()
+    key_source = settings.encryption_key or settings.secret_key
+    key_bytes = hashlib.sha256(key_source.encode()).digest()
     return base64.urlsafe_b64encode(key_bytes)
 
 
@@ -79,6 +85,11 @@ _fernet = Fernet(_get_encryption_key())
 def encrypt_value(plaintext: str) -> str:
     """Encrypt a string value for storage."""
     return _fernet.encrypt(plaintext.encode()).decode()
+
+
+def encrypt_smtp_password(plaintext: str) -> str:
+    """Backward-compatible alias for SMTP password encryption."""
+    return encrypt_value(plaintext)
 
 
 def decrypt_value(ciphertext: str) -> str:

@@ -7,7 +7,6 @@ generated_invoices/
 invoice_*.pdf
 __pycache__/
 *.pyc
-
 # Terraform
 **/.terraform/*
 *.tfstate
@@ -22,3 +21,4 @@ crash.*.log
 **/backend.hcl
 !**/backend.hcl.example
 .terraform.lock.hcl
+node_modules/
