@@ -1,0 +1,102 @@
+name: terraform-apply
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "infra/terraform/**"
+      - ".github/workflows/terraform-apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-dev:
+    runs-on: ubuntu-latest
+    environment: dev
+    env:
+      TF_IN_AUTOMATION: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform init (dev)
+        run: |
+          terraform -chdir=infra/terraform/envs/dev init \
+            -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}" \
+            -backend-config="key=invoice-enterprise/dev.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform apply (dev)
+        run: |
+          terraform -chdir=infra/terraform/envs/dev apply \
+            -input=false \
+            -auto-approve \
+            -lock=true \
+            -lock-timeout=10m \
+            -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}"
+
+  apply-prod:
+    runs-on: ubuntu-latest
+    needs: apply-dev
+    if: github.ref == 'refs/heads/main'
+    environment: prod
+    env:
+      TF_IN_AUTOMATION: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform init (prod)
+        run: |
+          terraform -chdir=infra/terraform/envs/prod init \
+            -backend-config="resource_group_name=${{ secrets.TFSTATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ secrets.TFSTATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ secrets.TFSTATE_CONTAINER }}" \
+            -backend-config="key=invoice-enterprise/prod.tfstate" \
+            -backend-config="use_azuread_auth=true"
+
+      - name: Terraform apply (prod)
+        run: |
+          terraform -chdir=infra/terraform/envs/prod apply \
+            -input=false \
+            -auto-approve \
+            -lock=true \
+            -lock-timeout=10m \
+            -var="subscription_id=${{ secrets.AZURE_SUBSCRIPTION_ID }}" \
+            -var="tenant_id=${{ secrets.AZURE_TENANT_ID }}"

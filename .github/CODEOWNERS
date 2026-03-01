@@ -1,0 +1,14 @@
+# Replace team handles below with your actual GitHub org teams.
+# Enforce with branch protection: "Require review from Code Owners".
+
+# Global fallback owner
+* @hanuman-dtech/platform-admins
+
+# Infrastructure and CI/CD changes require platform + security reviews
+/infra/terraform/** @hanuman-dtech/platform-admins @hanuman-dtech/security-team
+/.github/workflows/** @hanuman-dtech/platform-admins @hanuman-dtech/security-team
+/.github/BRANCH_PROTECTION.md @hanuman-dtech/platform-admins @hanuman-dtech/security-team
+
+# Backend and frontend application ownership
+/invoice-enterprise/backend/** @hanuman-dtech/backend-team
+/invoice-enterprise/frontend/** @hanuman-dtech/frontend-team
