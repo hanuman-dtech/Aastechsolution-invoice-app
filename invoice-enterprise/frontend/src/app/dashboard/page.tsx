@@ -87,28 +87,36 @@ export default function DashboardPage() {
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatsCard
-          title="Total Customers"
-          value={stats?.total_customers ?? "-"}
-          description={`${stats?.active_customers ?? 0} active`}
+          title="Invoices This Month"
+          value={stats?.total_invoices_this_month ?? "-"}
+          description="Generated this month"
           icon={Users}
         />
         <StatsCard
-          title="Total Invoices"
-          value={stats?.total_invoices ?? "-"}
-          description={`${stats?.invoices_this_month ?? 0} this month`}
+          title="Revenue This Month"
+          value={
+            stats
+              ? formatCurrency(Number(stats.total_revenue_this_month))
+              : "-"
+          }
+          description="Current month total"
           icon={FileText}
-        />
-        <StatsCard
-          title="Total Revenue"
-          value={stats ? formatCurrency(stats.total_revenue) : "-"}
-          description={stats ? `${formatCurrency(stats.revenue_this_month)} this month` : undefined}
-          icon={DollarSign}
         />
         <StatsCard
           title="Pending Emails"
           value={stats?.pending_emails ?? "-"}
-          description={stats?.recent_failures ? `${stats.recent_failures} recent failures` : undefined}
-          icon={stats?.recent_failures ? AlertCircle : TrendingUp}
+          description="Awaiting send or retry"
+          icon={DollarSign}
+        />
+        <StatsCard
+          title="Scheduled (Upcoming)"
+          value={stats?.upcoming_scheduled ?? "-"}
+          description={
+            stats?.last_run_date
+              ? `Last run: ${formatDate(stats.last_run_date)}`
+              : "No runs yet"
+          }
+          icon={stats?.last_run_status === "failed" ? AlertCircle : TrendingUp}
         />
       </div>
 
@@ -180,21 +188,21 @@ export default function DashboardPage() {
                   >
                     <div
                       className={`mt-1 h-2 w-2 rounded-full ${
-                        item.status === "success"
+                        item.failures === 0
                           ? "bg-green-500"
-                          : item.status === "warning"
-                          ? "bg-yellow-500"
                           : "bg-red-500"
                       }`}
                     />
                     <div className="flex-1 space-y-1">
-                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="text-sm font-medium">
+                        {item.mode.replace("_", " ")} run
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {item.description}
+                        PDFs: {item.pdfs_generated} · Emails: {item.emails_sent} · Failures: {item.failures}
                       </p>
                     </div>
                     <time className="text-xs text-muted-foreground">
-                      {formatDate(item.timestamp, "MMM d, h:mm a")}
+                      {formatDate(item.started_at, "MMM d, h:mm a")}
                     </time>
                   </div>
                 ))}

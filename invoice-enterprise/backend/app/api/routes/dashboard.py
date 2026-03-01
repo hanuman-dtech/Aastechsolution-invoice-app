@@ -163,7 +163,7 @@ async def get_recent_activity(
     return [{
         "id": log.id,
         "run_date": log.run_date.isoformat(),
-        "mode": log.mode.value,
+        "mode": getattr(log.mode, "value", log.mode),
         "started_at": log.started_at.isoformat(),
         "completed_at": log.completed_at.isoformat() if log.completed_at else None,
         "pdfs_generated": log.pdfs_generated,

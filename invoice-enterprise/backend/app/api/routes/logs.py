@@ -120,7 +120,7 @@ async def get_execution_stats(
         .where(ExecutionLog.run_date >= cutoff)
         .group_by(ExecutionLog.mode)
     )
-    runs_by_mode = {row[0].value: row[1] for row in mode_result.all()}
+    runs_by_mode = {getattr(row[0], "value", row[0]): row[1] for row in mode_result.all()}
     
     return {
         "period_days": days,

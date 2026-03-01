@@ -137,7 +137,7 @@ export default function LogsPage() {
                   <SelectItem value="quick">Quick</SelectItem>
                   <SelectItem value="wizard">Wizard</SelectItem>
                   <SelectItem value="scheduled">Scheduled</SelectItem>
-                  <SelectItem value="manual_override">Manual Override</SelectItem>
+                  <SelectItem value="manual">Manual Override</SelectItem>
                 </SelectContent>
               </Select>
             </div>
