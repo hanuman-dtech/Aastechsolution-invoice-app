@@ -1,13 +1,15 @@
 # Frontend Dockerfile
 FROM node:20-alpine AS base
 
+RUN corepack enable
+
 # Install dependencies only when needed
 FROM base AS deps
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
-RUN npm install
+COPY package.json yarn.lock* ./
+RUN yarn install --frozen-lockfile || yarn install
 
 # Development stage
 FROM base AS development
@@ -21,7 +23,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev"]
+CMD ["yarn", "dev"]
 
 # Builder stage
 FROM base AS builder
@@ -32,7 +34,7 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+RUN yarn build
 
 # Production stage
 FROM base AS production

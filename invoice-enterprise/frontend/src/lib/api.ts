@@ -71,17 +71,17 @@ class ApiClient {
   }
 
   async getUpcomingInvoices(days = 14): Promise<UpcomingInvoice[]> {
-    const { data } = await this.client.get(`/dashboard/upcoming?days=${days}`);
+    const { data } = await this.client.get(`/dashboard/upcoming-invoices?days_ahead=${days}`);
     return data;
   }
 
   async getRecentActivity(limit = 10): Promise<RecentActivity[]> {
-    const { data } = await this.client.get(`/dashboard/activity?limit=${limit}`);
+    const { data } = await this.client.get(`/dashboard/recent-activity?limit=${limit}`);
     return data;
   }
 
   async getRevenueByMonth(months = 6): Promise<RevenueByMonth[]> {
-    const { data } = await this.client.get(`/dashboard/revenue?months=${months}`);
+    const { data } = await this.client.get(`/dashboard/revenue-by-month?months=${months}`);
     return data;
   }
 
@@ -292,10 +292,17 @@ class ApiClient {
     mode?: string;
     start_date?: string;
     end_date?: string;
-    skip?: number;
     limit?: number;
   }): Promise<ExecutionLog[]> {
-    const { data } = await this.client.get("/logs", { params });
+    const { data } = await this.client.get("/execution-logs", {
+      params: {
+        mode: params?.mode,
+        start_date: params?.start_date,
+        end_date: params?.end_date,
+        page: 1,
+        per_page: params?.limit ?? 20,
+      },
+    });
     return data;
   }
 
@@ -305,8 +312,15 @@ class ApiClient {
     failed_runs: number;
     last_run: string | null;
   }> {
-    const { data } = await this.client.get("/logs/stats");
-    return data;
+    const { data } = await this.client.get("/execution-logs/stats/summary");
+    const latestLogs = await this.getExecutionLogs({ limit: 1 });
+
+    return {
+      total_runs: data.total_runs ?? 0,
+      successful_runs: data.successful_runs ?? 0,
+      failed_runs: data.failed_runs ?? 0,
+      last_run: latestLogs[0]?.started_at ?? null,
+    };
   }
 }
 

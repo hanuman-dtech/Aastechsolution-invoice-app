@@ -3,7 +3,7 @@
 export type BillingFrequency = "weekly" | "biweekly" | "monthly";
 export type InvoiceStatus = "generated" | "sent" | "failed";
 export type EmailStatus = "pending" | "sent" | "failed";
-export type ExecutionMode = "quick" | "wizard" | "scheduled" | "manual_override";
+export type ExecutionMode = "quick" | "wizard" | "scheduled" | "manual" | "generate_all";
 export type UserRole = "admin" | "operator" | "viewer";
 
 // Base types
@@ -299,14 +299,12 @@ export interface ExecutionSummary {
 
 // Dashboard Types
 export interface DashboardStats {
-  total_customers: number;
-  active_customers: number;
-  total_invoices: number;
-  total_revenue: number;
-  invoices_this_month: number;
-  revenue_this_month: number;
+  total_invoices_this_month: number;
+  total_revenue_this_month: number;
   pending_emails: number;
-  recent_failures: number;
+  upcoming_scheduled: number;
+  last_run_date: string | null;
+  last_run_status: string | null;
 }
 
 export interface UpcomingInvoice {
@@ -319,17 +317,21 @@ export interface UpcomingInvoice {
 
 export interface RecentActivity {
   id: string;
-  type: "invoice" | "email" | "execution";
-  title: string;
-  description: string;
-  timestamp: string;
-  status: "success" | "warning" | "error";
+  run_date: string;
+  mode: ExecutionMode;
+  started_at: string;
+  completed_at: string | null;
+  pdfs_generated: number;
+  emails_sent: number;
+  failures: number;
+  triggered_by: string | null;
 }
 
 export interface RevenueByMonth {
   month: string;
+  month_name: string;
   revenue: number;
-  invoices: number;
+  invoice_count: number;
 }
 
 // API Response Types

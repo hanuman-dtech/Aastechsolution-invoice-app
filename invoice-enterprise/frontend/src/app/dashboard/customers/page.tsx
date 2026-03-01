@@ -44,11 +44,23 @@ import type { Customer, CustomerCreate, CustomerUpdate, Vendor, CANADIAN_PROVINC
 
 export default function CustomersPage() {
   const queryClient = useQueryClient();
+  const paymentTermOptions = [
+    "Due on Receipt",
+    "Net 7",
+    "Net 10",
+    "Net 15",
+    "Net 30",
+    "Net 45",
+    "Net 60",
+    "Monthly",
+  ];
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [deletingCustomer, setDeletingCustomer] = useState<Customer | null>(null);
   const [contractorRegistry, setContractorRegistry] = useState<string[]>([]);
   const [newContractorName, setNewContractorName] = useState("");
+  const [createPaymentTerms, setCreatePaymentTerms] = useState("Monthly");
+  const [editPaymentTerms, setEditPaymentTerms] = useState("Monthly");
 
   const { data: customers, isLoading } = useQuery<Customer[]>({
     queryKey: ["customers"],
@@ -88,6 +100,10 @@ export default function CustomersPage() {
     );
   }, [contractorRegistry]);
 
+  useEffect(() => {
+    setEditPaymentTerms(editingCustomer?.contract?.payment_terms ?? "Monthly");
+  }, [editingCustomer]);
+
   const handleRegisterContractor = () => {
     const name = newContractorName.trim();
     if (!name) {
@@ -108,6 +124,7 @@ export default function CustomersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
       setIsCreateOpen(false);
+      setCreatePaymentTerms("Monthly");
       toast.success("Customer created successfully");
     },
     onError: (error: Error) => {
@@ -328,6 +345,7 @@ export default function CustomersPage() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleCreateSubmit}>
+            <input type="hidden" name="payment_terms" value={createPaymentTerms} />
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -398,12 +416,18 @@ export default function CustomersPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="payment_terms">Payment Terms</Label>
-                <Input
-                  id="payment_terms"
-                  name="payment_terms"
-                  defaultValue="Monthly"
-                  placeholder="e.g., Net 15, Net 30, Monthly"
-                />
+                <Select value={createPaymentTerms} onValueChange={setCreatePaymentTerms}>
+                  <SelectTrigger id="payment_terms">
+                    <SelectValue placeholder="Select payment terms" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentTermOptions.map((term) => (
+                      <SelectItem key={term} value={term}>
+                        {term}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>
@@ -435,6 +459,7 @@ export default function CustomersPage() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleUpdateSubmit}>
+            <input type="hidden" name="payment_terms" value={editPaymentTerms} />
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -524,12 +549,18 @@ export default function CustomersPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-payment_terms">Payment Terms</Label>
-                <Input
-                  id="edit-payment_terms"
-                  name="payment_terms"
-                  defaultValue={editingCustomer?.contract?.payment_terms ?? "Monthly"}
-                  placeholder="e.g., Net 15, Net 30, Monthly"
-                />
+                <Select value={editPaymentTerms} onValueChange={setEditPaymentTerms}>
+                  <SelectTrigger id="edit-payment_terms">
+                    <SelectValue placeholder="Select payment terms" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paymentTermOptions.map((term) => (
+                      <SelectItem key={term} value={term}>
+                        {term}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <DialogFooter>
