@@ -4,10 +4,11 @@ Invoice Enterprise Console - Core Configuration
 Environment-based configuration using Pydantic Settings.
 """
 
+import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import PostgresDsn, field_validator
+from pydantic import AliasChoices, Field, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,7 +31,10 @@ class Settings(BaseSettings):
     
     # API
     api_v1_prefix: str = "/api"
-    allowed_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    allowed_origins: list[str] = Field(
+        default=["http://localhost:3000", "http://127.0.0.1:3000"],
+        validation_alias=AliasChoices("ALLOWED_ORIGINS", "CORS_ORIGINS"),
+    )
     
     # Database
     database_url: str = "postgresql://postgres:postgres@localhost:5432/invoice_enterprise"
@@ -47,10 +51,19 @@ class Settings(BaseSettings):
     # SMTP (defaults can be overridden per-tenant in DB)
     smtp_host: str = ""
     smtp_port: int = 587
-    smtp_user: str = ""
+    smtp_user: str = Field(
+        default="",
+        validation_alias=AliasChoices("SMTP_USER", "SMTP_USERNAME"),
+    )
     smtp_password: str = ""
-    smtp_from: str = ""
+    smtp_from: str = Field(
+        default="",
+        validation_alias=AliasChoices("SMTP_FROM", "SMTP_FROM_EMAIL"),
+    )
     smtp_use_tls: bool = True
+
+    # Optional explicit encryption key (if omitted, secret_key is used)
+    encryption_key: str | None = None
     
     # Security
     access_token_expire_minutes: int = 30
@@ -70,7 +83,15 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            raw = v.strip()
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [str(origin).strip() for origin in parsed if str(origin).strip()]
+                except json.JSONDecodeError:
+                    pass
+            return [origin.strip() for origin in raw.split(",") if origin.strip()]
         return v
 
 

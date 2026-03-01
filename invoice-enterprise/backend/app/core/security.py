@@ -74,7 +74,8 @@ def decode_token(token: str) -> dict[str, Any] | None:
 def _get_encryption_key() -> bytes:
     """Derive a Fernet key from the secret key."""
     # Use SHA256 to get consistent 32 bytes, then base64 encode for Fernet
-    key_bytes = hashlib.sha256(settings.secret_key.encode()).digest()
+    key_source = settings.encryption_key or settings.secret_key
+    key_bytes = hashlib.sha256(key_source.encode()).digest()
     return base64.urlsafe_b64encode(key_bytes)
 
 

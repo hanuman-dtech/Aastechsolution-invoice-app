@@ -110,6 +110,20 @@ docker-compose exec backend python -m scripts.seed_data
 - OpenAPI docs: `http://localhost:8000/api/docs`
 - Mailhog UI: `http://localhost:8025`
 
+## Production Quick Reference (Docker Compose)
+
+1. Copy `invoice-enterprise/.env.production.example` to `.env.production`.
+2. Set real secrets/domains and immutable image tags.
+3. Deploy using the production compose file:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml pull
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backend alembic upgrade head
+```
+
+See `docs/DEPLOYMENT_RUNBOOK.md` for full production controls and manual operator checklist.
+
 ### Demo Accounts
 
 | Role | Email | Password |
@@ -134,8 +148,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 cd frontend
-npm install
-npm run dev
+yarn install
+yarn dev
 ```
 
 ### Celery (optional for local async)
