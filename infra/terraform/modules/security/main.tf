@@ -20,6 +20,11 @@ resource "azurerm_key_vault" "this" {
   purge_protection_enabled      = true
   soft_delete_retention_days    = 90
   tags                          = var.tags
+
+  network_acls {
+    default_action = "Deny"
+    bypass         = "AzureServices"
+  }
 }
 
 resource "azurerm_role_assignment" "key_vault_admin" {

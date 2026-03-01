@@ -36,6 +36,21 @@
 10. [Governance & Code Ownership](#10-governance--code-ownership)
 11. [Running It Yourself — Step-by-Step Commands](#11-running-it-yourself--step-by-step-commands)
 12. [Glossary](#12-glossary)
+13. [Complete Session Log — Everything We Did, In Order](#13-complete-session-log--everything-we-did-in-order)
+    - [Phase 1: Install Tools](#phase-1-install-tools)
+    - [Phase 2: Azure Login](#phase-2-azure-login)
+    - [Phase 3: Provision Terraform State Backend](#phase-3-provision-terraform-state-backend)
+    - [Phase 4: Write Terraform Modules & RBAC](#phase-4-write-terraform-modules--rbac)
+    - [Phase 5: Create CI/CD Pipelines](#phase-5-create-cicd-pipelines)
+    - [Phase 6: Create Governance Documents](#phase-6-create-governance-documents)
+    - [Phase 7: Configure GitHub OIDC](#phase-7-configure-github-oidc-passwordless-cicd)
+    - [Phase 8: Grant Azure Roles to the Service Principal](#phase-8-grant-azure-roles-to-the-service-principal)
+    - [Phase 9: Set GitHub Repository Secrets](#phase-9-set-github-repository-secrets)
+    - [Phase 10: Create GitHub Environments](#phase-10-create-github-environments)
+    - [Phase 11: Enable Branch Protection](#phase-11-enable-branch-protection)
+    - [Phase 12: Harden .gitignore](#phase-12-harden-gitignore)
+    - [Phase 13: Commit, Push, and Open Pull Request](#phase-13-commit-push-and-open-pull-request)
+    - [Phase 14: What Happens Now (Automatically)](#phase-14-what-happens-now-automatically)
 
 ---
 
@@ -1016,16 +1031,767 @@ terraform apply -var-file=terraform.tfvars
 
 ---
 
-## What's Next?
+## 13. Complete Session Log — Everything We Did, In Order
 
-The following steps are still pending (in order):
+This section documents **every step** performed during our infrastructure bootstrap session, in chronological order. Each step shows the command that was run, what it does, why it was needed, and what came after.
 
-1. **Configure GitHub OIDC** — Create an Entra app registration so GitHub Actions can authenticate to Azure without passwords
-2. **Add GitHub secrets** — Store `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` in repo settings
-3. **Create GitHub Environments** — Set up `dev` and `prod` with required reviewers for prod
-4. **Replace RBAC placeholders** — Put real Entra group IDs in `terraform.tfvars`
-5. **Enable branch protection** — Require PR reviews and passing checks before merging to `main`
-6. **First `terraform plan`/`apply`** — Actually create all the Azure resources!
+---
+
+### Phase 1: Install Tools
+
+**Step 1 — Detect the operating system**
+
+```bash
+cat /etc/os-release
+```
+
+**Result**: Ubuntu 24.04.3 LTS running on WSL2 (Windows Subsystem for Linux).
+**Why**: We needed to know which package manager and install commands to use.
+
+---
+
+**Step 2 — Install Azure CLI**
+
+```bash
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+```
+
+**What this does**: Downloads and runs Microsoft's official install script for Debian/Ubuntu. It adds the Microsoft package repo and installs `az` CLI.
+**Result**: `az version 2.83.0` installed at `/usr/bin/az`.
+
+---
+
+**Step 3 — Confirm Terraform is available**
+
+```bash
+terraform --version
+```
+
+**Result**: Terraform v1.14.6 at `/snap/bin/terraform` (was already installed via snap).
+
+---
+
+### Phase 2: Azure Login
+
+**Step 4 — Log in to Azure**
+
+```bash
+az login --use-device-code
+```
+
+**What this does**: Prints a URL and a code. You open the URL in a browser, enter the code, and sign in with your Microsoft account. The CLI then gets a token.
+**Why `--use-device-code`**: WSL2 can't always open a browser automatically, so device code flow is more reliable.
+
+**Result**: Logged in as `anusharao.t9479@outlook.com`.
+
+---
+
+**Step 5 — Verify subscription and tenant**
+
+```bash
+az account show --query "{subscriptionId:id, tenantId:tenantId, user:user.name}" -o json
+```
+
+**Result**:
+```json
+{
+  "subscriptionId": "ffaabce9-a623-45ba-8d10-da4c30d74c1f",
+  "tenantId": "8da61a47-5619-4370-9bd5-15bb6dd5445f",
+  "user": "anusharao.t9479@outlook.com"
+}
+```
+
+These IDs are used throughout — in Terraform variables, GitHub secrets, and role assignments.
+
+---
+
+### Phase 3: Provision Terraform State Backend
+
+**Why do we need this?** Terraform keeps a "state file" that tracks what resources it created. This file must be stored somewhere safe and shared. We store it in Azure Blob Storage.
+
+---
+
+**Step 6 — Register the Microsoft.Storage provider**
+
+```bash
+az provider show -n Microsoft.Storage --query registrationState -o tsv
+# Result: "NotRegistered"
+
+az provider register -n Microsoft.Storage --wait
+# Result: "Registered"
+```
+
+**What this does**: Azure has many "resource providers" — each one unlocks a type of service. `Microsoft.Storage` was not registered in our new subscription, so we couldn't create storage accounts. `--wait` blocks until registration completes.
+
+**Why it was needed**: The first attempt to create a storage account failed with `SubscriptionNotFound` because the provider wasn't registered.
+
+---
+
+**Step 7 — Create the state storage resource group**
+
+```bash
+az group create --name rg-tfstate-shared --location canadacentral
+```
+
+**What this does**: Creates a Resource Group (a container/folder) called `rg-tfstate-shared` in Canada Central region.
+**Why**: Every Azure resource must live inside a Resource Group.
+
+---
+
+**Step 8 — Create the storage account**
+
+```bash
+az storage account create \
+  --name sttfstate385403 \
+  --resource-group rg-tfstate-shared \
+  --location canadacentral \
+  --sku Standard_LRS \
+  --kind StorageV2 \
+  --https-only true \
+  --allow-blob-public-access false \
+  --allow-shared-key-access false \
+  --min-tls-version TLS1_2
+```
+
+**What each flag means**:
+
+| Flag | Meaning |
+|------|---------|
+| `--name sttfstate385403` | Globally unique name (3-24 chars, lowercase + numbers only, no hyphens!) |
+| `--sku Standard_LRS` | Cheapest tier: locally redundant storage |
+| `--https-only true` | Reject unencrypted HTTP connections |
+| `--allow-blob-public-access false` | Nobody can make blobs public |
+| `--allow-shared-key-access false` | Disable storage keys; force Azure AD auth only |
+| `--min-tls-version TLS1_2` | Reject old TLS versions |
+
+**Why the name `sttfstate385403`**: First attempt `test-terraform-storage-account` failed because hyphens are not allowed. We used `st` (storage) + `tfstate` (purpose) + `385403` (random suffix for uniqueness).
+
+---
+
+**Step 9 — Create the blob container**
+
+```bash
+az storage container create \
+  --account-name sttfstate385403 \
+  --name tfstate \
+  --auth-mode login
+```
+
+**What this does**: Creates a blob container named `tfstate` inside the storage account. A container is like a folder for blobs (files).
+**`--auth-mode login`**: Use our Azure AD login (not a storage key) to authenticate.
+
+---
+
+**Step 10 — Grant yourself Storage Blob Data Contributor**
+
+```bash
+az role assignment create \
+  --role "Storage Blob Data Contributor" \
+  --assignee "37804b6f-dd4a-4e77-9fb3-87d8d6dd679c" \
+  --scope "/subscriptions/ffaabce9-a623-45ba-8d10-da4c30d74c1f/resourceGroups/rg-tfstate-shared/providers/Microsoft.Storage/storageAccounts/sttfstate385403"
+```
+
+**What this does**: Gives your user account permission to read/write blobs in the storage account.
+**Why**: Since we disabled shared key access (`--allow-shared-key-access false`), the only way to access blobs is through Azure AD data-plane roles. Without this, `terraform init` would get a 403 Forbidden error.
+
+**Important**: RBAC assignments take ~30 seconds to propagate. The first `terraform init` attempt failed with 403, but after waiting 30 seconds it succeeded.
+
+---
+
+**Step 11 — Initialize Terraform with remote backend**
+
+```bash
+# Wait for RBAC propagation
+sleep 30
+
+# Dev environment
+cd infra/terraform/envs/dev
+terraform init -backend-config=backend.hcl -reconfigure
+
+# Prod environment
+cd ../prod
+terraform init -backend-config=backend.hcl -reconfigure
+```
+
+**What `-backend-config=backend.hcl` does**: Feeds the storage account connection details from `backend.hcl` into the `backend "azurerm" {}` block in `versions.tf`.
+
+**What `-reconfigure` does**: Forces Terraform to re-read the backend configuration even if already initialized.
+
+**Result**: "Successfully configured the backend 'azurerm'!" for both environments.
+
+---
+
+### Phase 4: Write Terraform Modules & RBAC
+
+This phase happened before the backend was provisioned (you can write code before having Azure resources).
+
+**Step 12 — Create 5 Terraform modules**
+
+We created 5 modules in `infra/terraform/modules/`:
+
+| Order | Module | Files Created | What It Manages |
+|-------|--------|--------------|-----------------|
+| 1 | `resource-group/` | main.tf, variables.tf, outputs.tf | Azure Resource Group |
+| 2 | `network/` | main.tf, variables.tf, outputs.tf | VNet + Subnets + Diagnostics |
+| 3 | `security/` | main.tf, variables.tf, outputs.tf | ACR + Key Vault + Private Endpoints + DNS |
+| 4 | `compute/` | main.tf, variables.tf, outputs.tf | App Service Plan + Web App + Identity |
+| 5 | `iam/` | main.tf, variables.tf, outputs.tf | 8 RBAC role assignments |
+
+**Step 13 — Create environment configurations**
+
+For each environment (dev, prod), created: `main.tf`, `variables.tf`, `outputs.tf`, `providers.tf`, `versions.tf`, `backend.hcl.example`, `terraform.tfvars.example`
+
+**Step 14 — Validate everything**
+
+```bash
+# Format all files consistently
+terraform fmt -recursive infra/terraform/
+
+# Validate syntax for both environments
+terraform -chdir=infra/terraform/envs/dev init -backend=false
+terraform -chdir=infra/terraform/envs/dev validate
+# Result: "Success! The configuration is valid."
+
+terraform -chdir=infra/terraform/envs/prod init -backend=false
+terraform -chdir=infra/terraform/envs/prod validate
+# Result: "Success! The configuration is valid."
+```
+
+**`-backend=false`**: Skips connecting to Azure — just checks syntax locally. Useful for validation during development.
+
+---
+
+### Phase 5: Create CI/CD Pipelines
+
+Created 5 GitHub Actions workflow files in `.github/workflows/`:
+
+| Workflow | Trigger | What It Does |
+|----------|---------|-------------|
+| `terraform-pr.yml` | Pull Request | fmt → validate → tflint → trivy scan → terraform plan |
+| `terraform-apply.yml` | Push to `main` | terraform apply (dev first, then prod with approval) |
+| `codeql.yml` | Push/PR/weekly | Security scanning for Python + JS/TS code |
+| `dependency-review.yml` | Pull Request | Block PRs with vulnerable dependencies |
+| `secret-scan.yml` | Push/PR | Gitleaks scans for accidentally committed secrets |
+
+Also created `dependabot.yml` for automated dependency updates.
+
+---
+
+### Phase 6: Create Governance Documents
+
+| File | Purpose |
+|------|---------|
+| `.github/CODEOWNERS` | Defines who must review changes to which files |
+| `.github/ORG_DEVOPS_RULES.md` | Enterprise DevOps rules: RBAC, branch protection, CI/CD security |
+| `.github/BRANCH_PROTECTION.md` | Recommended branch protection settings |
+
+---
+
+### Phase 7: Configure GitHub OIDC (Passwordless CI/CD)
+
+**Why OIDC?** Our DevOps rules say: "Use workload identities (OIDC) for CI/CD; prohibit client secrets for pipeline auth." OIDC lets GitHub Actions prove its identity to Azure without storing any password or secret key.
+
+---
+
+**Step 15 — Create an Entra app registration**
+
+```bash
+az ad app create --display-name "github-actions-invoice-app" \
+  --query "{appId:appId, id:id}" -o json
+```
+
+**Result**:
+```json
+{
+  "appId": "480c825d-b4e5-4cab-8dc7-ea60134d6185",
+  "id": "995a8d8a-e27a-4cf2-9891-9cd30584a4ad"
+}
+```
+
+**What this does**: Creates an "App Registration" in Microsoft Entra ID. This is like creating an employee profile for GitHub Actions. Two IDs are returned:
+- `appId` (also called Client ID) — the public identifier, used in GitHub secrets
+- `id` (Object ID) — the internal database ID, used for API calls
+
+---
+
+**Step 16 — Create a Service Principal for the app**
+
+```bash
+az ad sp create --id "480c825d-b4e5-4cab-8dc7-ea60134d6185" \
+  --query "{servicePrincipalId:id, appId:appId}" -o json
+```
+
+**Result**:
+```json
+{
+  "appId": "480c825d-b4e5-4cab-8dc7-ea60134d6185",
+  "servicePrincipalId": "70cf322c-c1ab-4fcf-af43-d2818a508cb1"
+}
+```
+
+**What's the difference between App Registration and Service Principal?**
+- **App Registration** = the identity definition (like a passport)
+- **Service Principal** = the identity in your specific tenant (like a work badge for that passport)
+
+You need both. The SP is what gets role assignments.
+
+---
+
+**Step 17 — Add 3 Federated Credentials**
+
+Each credential creates a trust relationship between a specific GitHub Actions context and this Azure identity.
+
+```bash
+# Credential 1: For the DEV environment
+az ad app federated-credential create \
+  --id "995a8d8a-e27a-4cf2-9891-9cd30584a4ad" \
+  --parameters '{
+    "name": "github-actions-dev",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:hanuman-dtech/Aastechsolution-invoice-app:environment:dev",
+    "audiences": ["api://AzureADTokenExchange"],
+    "description": "GitHub Actions OIDC for dev environment"
+  }'
+```
+
+```bash
+# Credential 2: For the PROD environment
+az ad app federated-credential create \
+  --id "995a8d8a-e27a-4cf2-9891-9cd30584a4ad" \
+  --parameters '{
+    "name": "github-actions-prod",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:hanuman-dtech/Aastechsolution-invoice-app:environment:prod",
+    "audiences": ["api://AzureADTokenExchange"],
+    "description": "GitHub Actions OIDC for prod environment"
+  }'
+```
+
+```bash
+# Credential 3: For Pull Requests (needed for terraform plan during PRs)
+az ad app federated-credential create \
+  --id "995a8d8a-e27a-4cf2-9891-9cd30584a4ad" \
+  --parameters '{
+    "name": "github-actions-pr",
+    "issuer": "https://token.actions.githubusercontent.com",
+    "subject": "repo:hanuman-dtech/Aastechsolution-invoice-app:pull_request",
+    "audiences": ["api://AzureADTokenExchange"],
+    "description": "GitHub Actions OIDC for pull requests"
+  }'
+```
+
+**How this works (simplified)**:
+
+```
+GitHub Actions workflow starts
+    │
+    ▼
+GitHub: "I am running a job in the 'dev' environment
+         for repo hanuman-dtech/Aastechsolution-invoice-app.
+         Here's a signed token proving it."
+    │
+    ▼
+Azure: "Let me check... I have a federated credential that says:
+        - Issuer must be: token.actions.githubusercontent.com ✅
+        - Subject must be: repo:hanuman-dtech/...:environment:dev ✅
+        - Audience must be: api://AzureADTokenExchange ✅
+        OK, I trust you. Here's an Azure access token."
+    │
+    ▼
+GitHub Actions: "Thanks! I'll use this token to run Terraform."
+```
+
+**No passwords are ever stored or transmitted.** The trust is based on cryptographic tokens signed by GitHub.
+
+---
+
+**Step 18 — Verify all federated credentials**
+
+```bash
+az ad app federated-credential list \
+  --id "995a8d8a-e27a-4cf2-9891-9cd30584a4ad" \
+  --query "[].{name:name, subject:subject}" -o table
+```
+
+**Result**:
+```
+Name                 Subject
+-------------------  ---------------------------------------------------------------
+github-actions-pr    repo:hanuman-dtech/Aastechsolution-invoice-app:pull_request
+github-actions-prod  repo:hanuman-dtech/Aastechsolution-invoice-app:environment:prod
+github-actions-dev   repo:hanuman-dtech/Aastechsolution-invoice-app:environment:dev
+```
+
+---
+
+### Phase 8: Grant Azure Roles to the Service Principal
+
+**Why**: The SP needs permission to actually do things in Azure. We follow least privilege — only the minimum roles required.
+
+---
+
+**Step 19 — Grant Contributor (subscription scope)**
+
+```bash
+az role assignment create \
+  --assignee-object-id "70cf322c-c1ab-4fcf-af43-d2818a508cb1" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Contributor" \
+  --scope "/subscriptions/ffaabce9-a623-45ba-8d10-da4c30d74c1f"
+```
+
+**What Contributor allows**: Create, modify, and delete resources (Resource Groups, VNets, Web Apps, etc.). Does NOT allow managing permissions (RBAC).
+
+---
+
+**Step 20 — Grant User Access Administrator (subscription scope)**
+
+```bash
+az role assignment create \
+  --assignee-object-id "70cf322c-c1ab-4fcf-af43-d2818a508cb1" \
+  --assignee-principal-type ServicePrincipal \
+  --role "User Access Administrator" \
+  --scope "/subscriptions/ffaabce9-a623-45ba-8d10-da4c30d74c1f"
+```
+
+**What User Access Administrator allows**: Create/delete role assignments. Needed because our Terraform code creates role assignments (the IAM module, the compute module's AcrPull/KV assignments).
+
+---
+
+**Step 21 — Grant Storage Blob Data Contributor (state storage account)**
+
+```bash
+az role assignment create \
+  --assignee-object-id "70cf322c-c1ab-4fcf-af43-d2818a508cb1" \
+  --assignee-principal-type ServicePrincipal \
+  --role "Storage Blob Data Contributor" \
+  --scope "/subscriptions/ffaabce9-a623-45ba-8d10-da4c30d74c1f/resourceGroups/rg-tfstate-shared/providers/Microsoft.Storage/storageAccounts/sttfstate385403"
+```
+
+**What this allows**: Read/write blobs in the state storage account. Needed for `terraform init` to access the state file.
+**Why scoped to the storage account only**: Least privilege — CI/CD only needs blob access on this one storage account, not all storage accounts in the subscription.
+
+---
+
+**Step 22 — Verify all role assignments**
+
+```bash
+az role assignment list \
+  --assignee "70cf322c-c1ab-4fcf-af43-d2818a508cb1" \
+  --all \
+  --query "[].{role:roleDefinitionName, scope:scope}" -o table
+```
+
+**Result**:
+```
+Role                           Scope
+-----------------------------  ---------------------------
+Contributor                    /subscriptions/ffaabce9-...
+User Access Administrator      /subscriptions/ffaabce9-...
+Storage Blob Data Contributor  .../storageAccounts/sttfstate385403
+```
+
+---
+
+### Phase 9: Set GitHub Repository Secrets
+
+**Why**: The CI/CD workflows reference `${{ secrets.AZURE_CLIENT_ID }}` etc. These values must be stored in GitHub's encrypted secrets storage.
+
+---
+
+**Step 23 — Set all 6 secrets**
+
+```bash
+# Azure identity
+gh secret set AZURE_CLIENT_ID --body "480c825d-b4e5-4cab-8dc7-ea60134d6185"
+gh secret set AZURE_TENANT_ID --body "8da61a47-5619-4370-9bd5-15bb6dd5445f"
+gh secret set AZURE_SUBSCRIPTION_ID --body "ffaabce9-a623-45ba-8d10-da4c30d74c1f"
+
+# Terraform state backend
+gh secret set TFSTATE_RESOURCE_GROUP --body "rg-tfstate-shared"
+gh secret set TFSTATE_STORAGE_ACCOUNT --body "sttfstate385403"
+gh secret set TFSTATE_CONTAINER --body "tfstate"
+```
+
+**What `gh secret set` does**: Encrypts the value and stores it in the repository settings. Only GitHub Actions workflows can read it — nobody can view the value, not even repo admins.
+
+---
+
+**Step 24 — Verify secrets exist**
+
+```bash
+gh secret list
+```
+
+**Result**:
+```
+NAME                     UPDATED
+AZURE_CLIENT_ID          less than a minute ago
+AZURE_SUBSCRIPTION_ID    less than a minute ago
+AZURE_TENANT_ID          less than a minute ago
+TFSTATE_CONTAINER        less than a minute ago
+TFSTATE_RESOURCE_GROUP   less than a minute ago
+TFSTATE_STORAGE_ACCOUNT  less than a minute ago
+```
+
+**How workflows use these secrets**:
+
+```yaml
+# In terraform-pr.yml:
+- name: Azure Login (OIDC)
+  uses: azure/login@v2
+  with:
+    client-id: ${{ secrets.AZURE_CLIENT_ID }}       # ← From our secret
+    tenant-id: ${{ secrets.AZURE_TENANT_ID }}       # ← From our secret
+    subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}  # ← From our secret
+```
+
+---
+
+### Phase 10: Create GitHub Environments
+
+**Why**: Our `terraform-apply.yml` workflow uses `environment: dev` and `environment: prod`. These must exist in GitHub for OIDC to work (the federated credential subjects reference them).
+
+---
+
+**Step 25 — Create dev environment (no gates)**
+
+```bash
+gh api --method PUT repos/hanuman-dtech/Aastechsolution-invoice-app/environments/dev
+```
+
+**What this does**: Creates a GitHub Environment named "dev". No protection rules — deployments to dev happen automatically.
+
+---
+
+**Step 26 — Get your GitHub user ID**
+
+```bash
+gh api user --jq '.id'
+# Result: 237657826
+```
+
+**Why**: The GitHub API needs numeric IDs for reviewers, not usernames.
+
+---
+
+**Step 27 — Create prod environment (with reviewer requirement)**
+
+```bash
+gh api --method PUT repos/hanuman-dtech/Aastechsolution-invoice-app/environments/prod \
+  -f 'reviewers[][type]=User' \
+  -F 'reviewers[][id]=237657826'
+```
+
+**What this does**: Creates a GitHub Environment named "prod" with a required reviewer. When the `apply-prod` job runs, it will **PAUSE** and wait for `hanuman-dtech` (you) to click "Approve" in the GitHub UI before proceeding.
+
+**Per DevOps rules**: "prod must require at least 2 reviewers." Currently we have 1 (solo project). Add more as team grows.
+
+---
+
+### Phase 11: Enable Branch Protection
+
+**Why**: DevOps rules say "Protect main branch: minimum approvals, code-owner review required, stale approvals dismissed."
+
+---
+
+**Step 28 — Apply branch protection rules to `main`**
+
+```bash
+gh api --method PUT repos/hanuman-dtech/Aastechsolution-invoice-app/branches/main/protection \
+  -F 'required_status_checks[strict]=true' \
+  -f 'required_status_checks[contexts][]=quality-gates' \
+  -F 'enforce_admins=true' \
+  -F 'required_pull_request_reviews[dismiss_stale_reviews]=true' \
+  -F 'required_pull_request_reviews[require_code_owner_reviews]=true' \
+  -F 'required_pull_request_reviews[required_approving_review_count]=1' \
+  -F 'restrictions=null' \
+  -F 'required_linear_history=true' \
+  -F 'allow_force_pushes=false' \
+  -F 'allow_deletions=false'
+```
+
+**What each setting does**:
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `required_status_checks[strict]` | `true` | Branch must be up-to-date with main before merging |
+| `required_status_checks[contexts]` | `quality-gates` | The `terraform-pr.yml` quality-gates job must pass |
+| `enforce_admins` | `true` | Even repo admins must follow these rules (no bypassing) |
+| `dismiss_stale_reviews` | `true` | If you push new commits, old approvals are invalidated |
+| `require_code_owner_reviews` | `true` | People listed in CODEOWNERS must approve |
+| `required_approving_review_count` | `1` | At least 1 approval needed (increase for teams) |
+| `required_linear_history` | `true` | No merge commits — clean, linear history |
+| `allow_force_pushes` | `false` | Cannot overwrite history on main |
+| `allow_deletions` | `false` | Cannot delete the main branch |
+
+---
+
+### Phase 12: Harden .gitignore
+
+**Why**: DevOps rules say "Never store credentials/secrets in repository files."
+
+---
+
+**Step 29 — Update .gitignore to block sensitive files**
+
+Added these patterns to `.gitignore`:
+
+```gitignore
+# Environment files (NEVER commit secrets)
+.env
+.env.*
+!.env.example
+
+# Terraform sensitive files
+**/backend.hcl
+!**/backend.hcl.example
+```
+
+**What this prevents**:
+- `.env` files with passwords → blocked
+- `.env.example` with placeholder values → allowed (note the `!` negation)
+- `backend.hcl` with real storage account names → blocked
+- `backend.hcl.example` with template values → allowed
+
+---
+
+### Phase 13: Commit, Push, and Open Pull Request
+
+**Step 30 — Stage and commit all changes**
+
+```bash
+git add .gitignore .github/ docs/INFRASTRUCTURE_BEGINNER_GUIDE.md infra/
+git status --short
+# Shows 41 files staged
+
+git commit -m "feat: enterprise Azure IaC, RBAC, CI/CD pipelines, and beginner docs"
+```
+
+**Why this commit message format**: Follows [Conventional Commits](https://www.conventionalcommits.org/) — `feat:` prefix means a new feature. This is important for automated changelogs and semantic versioning.
+
+---
+
+**Step 31 — Push to the remote branch**
+
+```bash
+git push origin chore/ui-backend-followup-20260301
+```
+
+**Result**: 41 files, 3,398 lines pushed to GitHub.
+
+---
+
+**Step 32 — Open (or update) the Pull Request**
+
+```bash
+# This PR already existed, so we updated its title and description:
+gh pr edit 5 \
+  --title "feat: enterprise Azure IaC, RBAC, CI/CD pipelines, and beginner docs" \
+  --body "... (comprehensive PR description with all sections and checklist)"
+```
+
+**Result**: PR #5 updated at https://github.com/hanuman-dtech/Aastechsolution-invoice-app/pull/5
+
+---
+
+### Phase 14: What Happens Now (Automatically)
+
+When the PR was pushed, GitHub Actions **automatically triggered** the `terraform-pr.yml` workflow:
+
+```
+PR #5 pushed
+    │
+    ▼
+┌─── Job: quality-gates ─────────────────────────────────┐
+│                                                         │
+│  1. Checkout code                                       │
+│  2. Setup Terraform 1.9.8                               │
+│  3. Azure Login (OIDC — uses federated credential       │
+│     with subject "pull_request")                        │
+│  4. terraform fmt -check -recursive                     │
+│     → Are all files formatted correctly?                │
+│  5. terraform init + validate (dev and prod)            │
+│     → Is the code syntactically valid?                  │
+│  6. tflint                                              │
+│     → Are there common mistakes?                        │
+│  7. trivy IaC scan (HIGH/CRITICAL → fail)               │
+│     → Are there security misconfigurations?             │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+    │ (only if quality-gates passes)
+    ▼
+┌─── Job: plan (matrix: [dev, prod]) ────────────────────┐
+│                                                         │
+│  For each environment:                                  │
+│  1. Azure Login (OIDC)                                  │
+│  2. terraform init (with remote backend secrets)        │
+│  3. terraform plan                                      │
+│     → Shows exactly what WOULD be created               │
+│  4. Upload plan artifact                                │
+│     → Saved for audit trail (14 days)                   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**After merge to main**, the `terraform-apply.yml` workflow will:
+
+```
+Merge to main
+    │
+    ▼
+┌─── Job: apply-dev ─────────────────────────────────────┐
+│  1. Azure Login (OIDC — subject "environment:dev")      │
+│  2. terraform init                                      │
+│  3. terraform apply -auto-approve                       │
+│     → CREATES all dev resources in Azure                │
+└─────────────────────────────────────────────────────────┘
+    │ (only if dev succeeds)
+    ▼
+┌─── Job: apply-prod ────────────────────────────────────┐
+│  ⏸️ PAUSED — waiting for reviewer approval              │
+│     (hanuman-dtech must click "Approve" in GitHub UI)   │
+│                                                         │
+│  After approval:                                        │
+│  1. Azure Login (OIDC — subject "environment:prod")     │
+│  2. terraform init                                      │
+│  3. terraform apply -auto-approve                       │
+│     → CREATES all prod resources in Azure               │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Summary: Complete Execution Order
+
+| # | Phase | Steps | Key Commands |
+|---|-------|-------|-------------|
+| 1 | Install Tools | 1-3 | `curl ... \| sudo bash`, `terraform --version` |
+| 2 | Azure Login | 4-5 | `az login --use-device-code`, `az account show` |
+| 3 | State Backend | 6-11 | `az provider register`, `az storage account create`, `az role assignment create`, `terraform init` |
+| 4 | Terraform Code | 12-14 | Created 5 modules + 2 env configs, `terraform fmt`, `terraform validate` |
+| 5 | CI/CD Pipelines | — | Created 5 workflow YAML files + dependabot.yml |
+| 6 | Governance Docs | — | Created CODEOWNERS, ORG_DEVOPS_RULES.md, BRANCH_PROTECTION.md |
+| 7 | OIDC Setup | 15-18 | `az ad app create`, `az ad sp create`, `az ad app federated-credential create` (×3) |
+| 8 | SP Roles | 19-22 | `az role assignment create` (Contributor + UAA + Storage Blob) |
+| 9 | GitHub Secrets | 23-24 | `gh secret set` (×6) |
+| 10 | Environments | 25-27 | `gh api --method PUT .../environments/dev`, `.../environments/prod` |
+| 11 | Branch Protection | 28 | `gh api --method PUT .../branches/main/protection` |
+| 12 | .gitignore | 29 | Added `.env`, `backend.hcl` patterns |
+| 13 | Commit & PR | 30-32 | `git commit`, `git push`, `gh pr edit` |
+| 14 | Auto CI/CD | — | `terraform-pr.yml` triggers automatically on PR |
+
+---
+
+### Remaining Steps
+
+| # | Task | How |
+|---|------|-----|
+| 1 | **Review & merge PR** | Approve PR #5 in GitHub, or temporarily disable `enforce_admins` to self-merge |
+| 2 | **First `terraform apply`** | Triggered automatically when PR merges to main |
+| 3 | **Create `terraform.tfvars`** | Copy from `.example`, fill in real subscription/tenant IDs for local testing |
+| 4 | **Add Entra groups for RBAC** | Create groups in Entra ID, add their Object IDs to `terraform.tfvars` |
+| 5 | **Rotate SMTP password** | Go to Apple ID > Sign-In & Security > App-Specific Passwords and revoke/recreate |
 
 ---
 
