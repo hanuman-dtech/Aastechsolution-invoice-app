@@ -3,3 +3,4 @@ generated_invoices/
 invoice_*.pdf
 __pycache__/
 *.pyc
+node_modules/

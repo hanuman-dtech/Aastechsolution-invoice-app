@@ -44,6 +44,7 @@ async def seed_database():
             is_active=True,
         )
         db.add(admin_user)
+        await db.flush()
         print("✅ Created admin user: admin@invoiceenterprise.local / admin123")
         
         # Create viewer user
@@ -56,6 +57,7 @@ async def seed_database():
             is_active=True,
         )
         db.add(viewer_user)
+        await db.flush()
         print("✅ Created viewer user: viewer@invoiceenterprise.local / viewer123")
         
         # Create vendor (your company)
@@ -74,6 +76,7 @@ async def seed_database():
             is_active=True,
         )
         db.add(vendor)
+        await db.flush()
         print(f"✅ Created vendor: {vendor.name}")
         
         # Create SMTP config (for Mailhog in dev)
@@ -222,6 +225,7 @@ async def seed_database():
                 is_active=True,
             )
             db.add(customer)
+            await db.flush()
             
             # Add contract
             contract_data = cust_data["contract"]
@@ -256,6 +260,9 @@ async def seed_database():
             db.add(schedule)
             
             print(f"✅ Created customer: {customer.name} (prefix: {contract.invoice_prefix})")
+
+        # Ensure pending inserts are visible to subsequent SELECT statements
+        await db.flush()
         
         # Create some sample invoices for history
         acme_customer = await db.execute(
@@ -321,6 +328,7 @@ async def seed_database():
                 generation_mode=ExecutionMode.SCHEDULED,
             )
             db.add(invoice)
+            await db.flush()
             
             # Add invoice lines
             line1 = InvoiceLine(
@@ -351,6 +359,7 @@ async def seed_database():
             triggered_by="celery-beat",
         )
         db.add(log1)
+        await db.flush()
         
         log2 = ExecutionLog(
             id=str(uuid.uuid4()),
@@ -366,6 +375,7 @@ async def seed_database():
             triggered_by="admin@invoiceenterprise.local",
         )
         db.add(log2)
+        await db.flush()
         print("✅ Created execution logs")
         
         await db.commit()
