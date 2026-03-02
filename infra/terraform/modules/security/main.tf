@@ -120,11 +120,10 @@ resource "azurerm_monitor_diagnostic_setting" "acr" {
     }
   }
 
-  dynamic "metric" {
+  dynamic "enabled_metric" {
     for_each = toset(data.azurerm_monitor_diagnostic_categories.acr.metrics)
     content {
-      category = metric.value
-      enabled  = true
+      category = enabled_metric.value
     }
   }
 }
@@ -145,79 +144,12 @@ resource "azurerm_monitor_diagnostic_setting" "kv" {
     }
   }
 
-  dynamic "metric" {
+  dynamic "enabled_metric" {
     for_each = toset(data.azurerm_monitor_diagnostic_categories.kv.metrics)
     content {
-      category = metric.value
-      enabled  = true
+      category = enabled_metric.value
     }
   }
 }
 
-data "azurerm_monitor_diagnostic_categories" "private_endpoint" {
-  for_each = {
-    acr = azurerm_private_endpoint.acr.id
-    kv  = azurerm_private_endpoint.kv.id
-  }
-  resource_id = each.value
-}
 
-resource "azurerm_monitor_diagnostic_setting" "private_endpoint" {
-  for_each = {
-    acr = azurerm_private_endpoint.acr.id
-    kv  = azurerm_private_endpoint.kv.id
-  }
-
-  name                       = "diag-${split("/", each.value)[8]}"
-  target_resource_id         = each.value
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_endpoint[each.key].log_category_types)
-    content {
-      category = enabled_log.value
-    }
-  }
-
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_endpoint[each.key].metrics)
-    content {
-      category = metric.value
-      enabled  = true
-    }
-  }
-}
-
-data "azurerm_monitor_diagnostic_categories" "private_dns_zone" {
-  for_each = {
-    acr = azurerm_private_dns_zone.acr.id
-    kv  = azurerm_private_dns_zone.kv.id
-  }
-  resource_id = each.value
-}
-
-resource "azurerm_monitor_diagnostic_setting" "private_dns_zone" {
-  for_each = {
-    acr = azurerm_private_dns_zone.acr.id
-    kv  = azurerm_private_dns_zone.kv.id
-  }
-
-  name                       = "diag-${split("/", each.value)[8]}"
-  target_resource_id         = each.value
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_dns_zone[each.key].log_category_types)
-    content {
-      category = enabled_log.value
-    }
-  }
-
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_dns_zone[each.key].metrics)
-    content {
-      category = metric.value
-      enabled  = true
-    }
-  }
-}

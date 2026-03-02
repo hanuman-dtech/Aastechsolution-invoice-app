@@ -123,27 +123,4 @@ module "iam" {
   app_service_contributor_principal_ids          = var.app_service_contributor_principal_ids
 }
 
-data "azurerm_monitor_diagnostic_categories" "resource_group" {
-  resource_id = module.resource_group.id
-}
 
-resource "azurerm_monitor_diagnostic_setting" "resource_group" {
-  name                       = "diag-${module.resource_group.name}"
-  target_resource_id         = module.resource_group.id
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
-
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.resource_group.log_category_types)
-    content {
-      category = enabled_log.value
-    }
-  }
-
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.resource_group.metrics)
-    content {
-      category = metric.value
-      enabled  = true
-    }
-  }
-}

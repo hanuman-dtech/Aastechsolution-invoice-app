@@ -10,7 +10,7 @@ app_subnet_prefixes             = ["10.20.1.0/24"]
 private_endpoint_subnet_prefixes = ["10.20.2.0/24"]
 
 container_image = "invoice-api:latest"
-app_service_sku = "P1v3"
+app_service_sku = "S1"
 
 log_analytics_local_authentication_enabled = true
 log_analytics_internet_ingestion_enabled   = false

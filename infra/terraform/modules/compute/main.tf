@@ -110,11 +110,10 @@ resource "azurerm_monitor_diagnostic_setting" "service_plan" {
     }
   }
 
-  dynamic "metric" {
+  dynamic "enabled_metric" {
     for_each = toset(data.azurerm_monitor_diagnostic_categories.service_plan.metrics)
     content {
-      category = metric.value
-      enabled  = true
+      category = enabled_metric.value
     }
   }
 }
@@ -135,61 +134,12 @@ resource "azurerm_monitor_diagnostic_setting" "web_app" {
     }
   }
 
-  dynamic "metric" {
+  dynamic "enabled_metric" {
     for_each = toset(data.azurerm_monitor_diagnostic_categories.web_app.metrics)
     content {
-      category = metric.value
-      enabled  = true
+      category = enabled_metric.value
     }
   }
 }
 
-data "azurerm_monitor_diagnostic_categories" "private_endpoint" {
-  resource_id = azurerm_private_endpoint.appservice.id
-}
 
-resource "azurerm_monitor_diagnostic_setting" "private_endpoint" {
-  name                       = "diag-${azurerm_private_endpoint.appservice.name}"
-  target_resource_id         = azurerm_private_endpoint.appservice.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_endpoint.log_category_types)
-    content {
-      category = enabled_log.value
-    }
-  }
-
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_endpoint.metrics)
-    content {
-      category = metric.value
-      enabled  = true
-    }
-  }
-}
-
-data "azurerm_monitor_diagnostic_categories" "private_dns_zone" {
-  resource_id = azurerm_private_dns_zone.appservice.id
-}
-
-resource "azurerm_monitor_diagnostic_setting" "private_dns_zone" {
-  name                       = "diag-${azurerm_private_dns_zone.appservice.name}"
-  target_resource_id         = azurerm_private_dns_zone.appservice.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_dns_zone.log_category_types)
-    content {
-      category = enabled_log.value
-    }
-  }
-
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.private_dns_zone.metrics)
-    content {
-      category = metric.value
-      enabled  = true
-    }
-  }
-}

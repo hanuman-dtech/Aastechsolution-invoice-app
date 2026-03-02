@@ -53,7 +53,7 @@ variable "container_image" {
 variable "app_service_sku" {
   description = "App Service plan SKU."
   type        = string
-  default     = "P1v3"
+  default     = "S1"
 }
 
 variable "log_analytics_local_authentication_enabled" {

@@ -72,7 +72,7 @@ variable "health_check_path" {
 variable "sku_name" {
   description = "App Service Plan SKU."
   type        = string
-  default     = "P1v3"
+  default     = "S1"
 }
 
 variable "app_settings" {

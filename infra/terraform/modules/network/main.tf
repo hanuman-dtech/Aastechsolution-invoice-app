@@ -46,39 +46,12 @@ resource "azurerm_monitor_diagnostic_setting" "vnet" {
     }
   }
 
-  dynamic "metric" {
+  dynamic "enabled_metric" {
     for_each = toset(data.azurerm_monitor_diagnostic_categories.vnet.metrics)
     content {
-      category = metric.value
-      enabled  = true
+      category = enabled_metric.value
     }
   }
 }
 
-data "azurerm_monitor_diagnostic_categories" "subnet" {
-  for_each    = azurerm_subnet.this
-  resource_id = each.value.id
-}
 
-resource "azurerm_monitor_diagnostic_setting" "subnet" {
-  for_each = azurerm_subnet.this
-
-  name                       = "diag-${each.value.name}"
-  target_resource_id         = each.value.id
-  log_analytics_workspace_id = var.log_analytics_workspace_id
-
-  dynamic "enabled_log" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.subnet[each.key].log_category_types)
-    content {
-      category = enabled_log.value
-    }
-  }
-
-  dynamic "metric" {
-    for_each = toset(data.azurerm_monitor_diagnostic_categories.subnet[each.key].metrics)
-    content {
-      category = metric.value
-      enabled  = true
-    }
-  }
-}
