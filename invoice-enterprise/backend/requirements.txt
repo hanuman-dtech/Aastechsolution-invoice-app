@@ -19,7 +19,7 @@ celery[redis]==5.3.6
 redis==5.0.1
 
 # PDF Generation
-reportlab==4.1.0
+reportlab==4.4.10
 
 # Utils
 python-dotenv==1.0.1
