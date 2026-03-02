@@ -34,6 +34,9 @@ COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Create public dir if it doesn't exist (needed by COPY below)
+RUN mkdir -p public
+
 RUN yarn build
 
 # Production stage
