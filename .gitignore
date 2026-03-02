@@ -22,3 +22,9 @@ crash.*.log
 !**/backend.hcl.example
 .terraform.lock.hcl
 node_modules/
+
+# Terraform secrets
+infra/terraform/envs/deploy/terraform.tfvars
+*.tfstate
+*.tfstate.backup
+.terraform/
