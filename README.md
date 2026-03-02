@@ -1,91 +1,229 @@
-# IT Consulting Invoice Automation
+# Invoice Enterprise Console
 
-Generate PDF invoices for consulting customers using preset contract data (hours/rate/HST/frequency), with optional SMTP email delivery.
+Enterprise-grade invoice management and automation platform — generates PDF invoices, automates scheduling, and delivers via email.
 
-## Project files
+---
 
-- `invoice.py` — main generator + interactive modes + optional email sender
-- `contracts.sample.json` — vendor + customer contract presets
-- `.env.example` — SMTP configuration template for email sending
+## Architecture
 
-## Configure contract presets
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| **Frontend** | Next.js 16, React 19, Tailwind CSS 4 | Dashboard UI |
+| **Backend API** | FastAPI, Python 3.12, SQLAlchemy 2.0 | REST API, invoice engine |
+| **Worker** | Celery 5.6 | Background job processing (email, PDF generation) |
+| **Database** | PostgreSQL 16 | Persistent storage |
+| **Cache/Broker** | Redis 7 | Celery message broker + caching |
 
-Edit `contracts.sample.json` with your real values.
+---
 
-Supported frequencies:
+## Quick Start (Local Development)
 
-- `weekly`
-- `biweekly`
-- `monthly`
+```bash
+cd invoice-enterprise
+docker compose up --build
+```
 
-Schedule fields:
+This starts all services locally:
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
+- Swagger Docs: http://localhost:8000/api/docs
 
-- Weekly: `billing_weekday` (`0=Mon .. 6=Sun`)
-- Biweekly: `billing_weekday`, `anchor_date` (`YYYY-MM-DD`)
-- Monthly: `billing_day` (`1..31`)
+---
 
-## Fastest ways to run
+## Azure Deployment (One Command)
 
-### 1) One-command auto mode
+### Prerequisites
 
-`python3 invoice.py`
+| Tool | Install |
+|------|---------|
+| **Azure CLI** | `curl -sL https://aka.ms/InstallAzureCLIDeb \| sudo bash` |
+| **Terraform** | `brew install terraform` or [download](https://developer.hashicorp.com/terraform/install) |
+| **Docker** | [Docker Desktop](https://docs.docker.com/get-docker/) |
 
-Behavior:
+### Deploy
 
-- Uses `contracts.sample.json`
-- Uses today's date
-- Writes PDFs to `generated_invoices/`
-- If no customer matches schedule, it automatically generates all customers (PDF only, no email)
+```bash
+# 1. Login to Azure
+az login
 
-### 2) Quick 3-input mode (your requested flow)
+# 2. Deploy everything with one command
+cd infra/terraform/envs/deploy
+chmod +x deploy.sh destroy.sh
+./deploy.sh
+```
 
-`python3 invoice.py --quick`
+**That's it.** The script will:
+1. Check all prerequisites (Azure CLI, Terraform, Docker)
+2. Create `terraform.tfvars` from your Azure context (prompts for DB password)
+3. Register required Azure resource providers
+4. Provision all infrastructure (Resource Group, ACR, PostgreSQL, Log Analytics, Container Apps Environment, Redis)
+5. Build both Docker images and push to Azure Container Registry
+6. Deploy all Container Apps (backend, frontend, celery worker)
+7. Verify health and print the live URLs
 
-Prompts only:
+### What Gets Created
 
-1. Customer name
-2. Run date (`YYYY-MM-DD`)
-3. Total hours
+| Resource | SKU/Tier | ~Monthly Cost |
+|----------|----------|---------------|
+| Resource Group | — | Free |
+| Container Registry | Basic | ~$5 |
+| PostgreSQL Flexible Server | Burstable B1ms | ~$12 |
+| Log Analytics Workspace | PerGB2018 | ~$2 |
+| Container Apps Environment | Consumption | Free tier |
+| Container App: Backend | 0.5 vCPU / 1 GiB | ~$0* |
+| Container App: Frontend | 0.25 vCPU / 0.5 GiB | ~$0* |
+| Container App: Celery Worker | 0.25 vCPU / 0.5 GiB | ~$0* |
+| Container App: Redis | 0.25 vCPU / 0.5 GiB | ~$0* |
 
-Everything else comes from `contracts.sample.json` presets (rate, HST, address, fees, payment terms, etc.).
+\* Container Apps include a generous free grant (~180K vCPU-seconds/month).
 
-To send email in the same quick flow:
+**Estimated total: ~$19/month** (mostly PostgreSQL).
 
-`python3 invoice.py --quick --send-email`
+### Destroy (One Command)
 
-### 3) Full interactive wizard
+```bash
+cd infra/terraform/envs/deploy
+./destroy.sh
+```
 
-`python3 invoice.py --wizard`
+This will:
+1. Run `terraform destroy` to remove all 13 Azure resources
+2. Safety-net: verify the resource group is gone (force-delete if orphaned)
+3. Clean up local Docker images
 
-Guided options with format hints, including:
+**Zero orphan resources.** Your Azure account is completely clean after this.
 
-- contracts: scheduled customers only
-- contracts: all customers
-- single custom customer invoice
+### Emergency Cleanup
 
-## Explicit CLI usage (advanced)
+If `destroy.sh` fails or Terraform state is lost:
 
-- Generate from contracts:
-	- `python3 invoice.py --contracts-file contracts.sample.json --output-dir generated_invoices`
-- Use specific run date:
-	- `python3 invoice.py --run-date 2026-03-01`
-- Force all customers:
-	- `python3 invoice.py --all`
-- Disable auto-fallback behavior:
-	- `python3 invoice.py --no-auto`
+```bash
+# Find and delete the resource group directly (deletes EVERYTHING inside it)
+az group list --query "[?starts_with(name,'rg-invoice-deploy')].name" -o tsv \
+  | xargs -I{} az group delete -n {} --yes --no-wait
+```
 
-## Email sending
+---
 
-1. Copy `.env.example` to `.env` and fill SMTP values.
-2. Run:
-	 - `python3 invoice.py --send-email`
+## Standalone Invoice Generator (CLI)
 
-Notes:
+The original CLI tool for quick invoice generation without the full enterprise stack.
 
-- `.env` is auto-loaded by the script.
-- If `--send-email` finds zero scheduled customers, it automatically switches to quick 3-input mode (customer/date/hours) and sends that invoice email.
+### One-command auto mode
 
-## Notes
+```bash
+python3 invoice.py
+```
 
-- Money values use `Decimal` with 2-digit HALF_UP rounding.
-- Generated files are saved in `generated_invoices/` by default.
+Uses `contracts.sample.json`, today's date, writes PDFs to `generated_invoices/`.
+
+### Quick 3-input mode
+
+```bash
+python3 invoice.py --quick
+```
+
+Prompts for: customer name, run date, total hours. Everything else from presets.
+
+### With email delivery
+
+```bash
+python3 invoice.py --quick --send-email
+```
+
+### Full wizard
+
+```bash
+python3 invoice.py --wizard
+```
+
+### CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `--contracts-file FILE` | Path to contracts JSON |
+| `--output-dir DIR` | Output directory for PDFs |
+| `--run-date YYYY-MM-DD` | Override billing date |
+| `--all` | Force all customers |
+| `--no-auto` | Disable auto-fallback |
+| `--send-email` | Send invoice via SMTP |
+
+---
+
+## API Documentation
+
+When deployed, the API docs are available at:
+
+| Endpoint | URL |
+|----------|-----|
+| Swagger UI | `{BACKEND_URL}/api/docs` |
+| ReDoc | `{BACKEND_URL}/api/redoc` |
+| OpenAPI JSON | `{BACKEND_URL}/api/openapi.json` |
+
+### Key API Routes
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/api/dashboard/stats` | Dashboard statistics |
+| `POST` | `/api/invoices/run/quick` | Quick invoice generation |
+| `POST` | `/api/invoices/run/wizard` | Wizard invoice generation |
+| `GET` | `/api/customers/` | List customers |
+| `GET` | `/api/vendors/` | List vendors |
+| `GET` | `/api/logs/` | Audit logs |
+| `POST` | `/api/smtp/test` | Test SMTP configuration |
+
+---
+
+## Project Structure
+
+```
+├── invoice.py                    # Standalone CLI invoice generator
+├── contracts.sample.json         # Contract presets for CLI
+├── infra/terraform/envs/deploy/  # Azure IaC (Terraform)
+│   ├── deploy.sh                 # One-command deploy
+│   ├── destroy.sh                # One-command destroy
+│   ├── main.tf                   # All Azure resources
+│   ├── variables.tf              # Input variables
+│   ├── outputs.tf                # Output URLs
+│   ├── providers.tf              # AzureRM provider config
+│   └── versions.tf               # Terraform/provider versions
+├── invoice-enterprise/           # Full enterprise application
+│   ├── docker-compose.yml        # Local development
+│   ├── backend/                  # FastAPI backend
+│   │   ├── app/
+│   │   │   ├── main.py           # App entrypoint
+│   │   │   ├── api/routes/       # API route handlers
+│   │   │   ├── core/             # Config, DB, security
+│   │   │   ├── models/           # SQLAlchemy models
+│   │   │   ├── schemas/          # Pydantic schemas
+│   │   │   ├── services/         # Business logic
+│   │   │   └── worker/           # Celery tasks
+│   │   ├── alembic/              # DB migrations
+│   │   ├── Dockerfile
+│   │   └── requirements.txt
+│   └── frontend/                 # Next.js frontend
+│       ├── src/app/              # App router pages
+│       ├── src/components/       # React components
+│       ├── src/lib/              # API client, utilities
+│       ├── Dockerfile
+│       └── package.json
+└── docs/                         # Additional documentation
+```
+
+---
+
+## Docker Hub Images
+
+Pre-built images are available on Docker Hub:
+
+```bash
+docker pull sairam9479/invoice-enterprise-backend:v2.0.0
+docker pull sairam9479/invoice-enterprise-frontend:v2.0.0
+```
+
+---
+
+## License
+
+Private repository.
