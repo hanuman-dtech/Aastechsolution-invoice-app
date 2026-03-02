@@ -188,7 +188,7 @@ resource "azurerm_container_app" "backend" {
       }
       env {
         name  = "DEBUG"
-        value = "false"
+        value = "true"
       }
       env {
         name  = "CORS_ORIGINS"
