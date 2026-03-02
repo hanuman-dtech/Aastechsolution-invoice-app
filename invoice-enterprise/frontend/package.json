@@ -19,7 +19,7 @@
     "@tanstack/react-query-devtools": "^5.32.0",
     "react-hook-form": "^7.51.0",
     "@hookform/resolvers": "^3.3.0",
-    "zod": "^3.23.0",
+    "zod": "^4.3.6",
     "axios": "^1.6.0",
     "date-fns": "^3.6.0",
     "lucide-react": "^0.575.0",
